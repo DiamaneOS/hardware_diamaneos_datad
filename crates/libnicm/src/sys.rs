@@ -179,3 +179,27 @@ pub fn drain(r: BorrowedFd<'_>) {
     // SAFETY: the pointer and the length are those of b.
     while unsafe { libc::read(r.as_raw_fd(), b.as_mut_ptr().cast(), b.len()) } > 0 {}
 }
+
+#[cfg(target_os = "android")]
+extern "C" {
+    /// liblog (`libnicm.so` links it: `shared_libs` of its Android.bp).
+    fn __android_log_write(
+        prio: libc::c_int,
+        tag: *const libc::c_char,
+        text: *const libc::c_char,
+    ) -> libc::c_int;
+}
+
+/// One line to logd at the information level, tag `nicm`. Nothing happens off Android (the host tests). A line
+/// is cut at 1000 bytes, and a zero byte in it is left out.
+pub fn log_info(text: &str) {
+    #[cfg(target_os = "android")]
+    {
+        let mut line: Vec<u8> = text.bytes().filter(|b| *b != 0).take(1000).collect();
+        line.push(0);
+        // SAFETY: the tag and the line are NUL-terminated, live through the call, and liblog only reads them.
+        let _ = unsafe { __android_log_write(4, c"nicm".as_ptr(), line.as_ptr().cast()) };
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = text;
+}

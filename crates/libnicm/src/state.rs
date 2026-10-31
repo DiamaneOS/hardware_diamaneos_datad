@@ -8,6 +8,7 @@
 use crate::abi::Callback;
 use crate::command::{self, Pending};
 use crate::conn::FdTransport;
+use crate::log;
 use crate::restart::Restart;
 use crate::sys;
 use dataos_nicm_abi::{abi_enabled, kind, status, EventBuf, NicmCmd, NicmReply};
@@ -125,6 +126,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// so no callback runs between the reading and the closing, and a Down the daemon wrote is never dropped with
 /// the socket. Used wherever the connection ends, whatever the reason.
 fn give_up(g: &mut Inner) -> Vec<Notice> {
+    log::info("nicm: the connection to datad ended");
     let notices = g.client.finish();
     g.client.transport_mut().close();
     notices
@@ -135,9 +137,13 @@ impl Shared {
     pub fn start(mut connector: Connector) -> Option<Arc<Shared>> {
         let (wake_r, wake_w) = sys::wake_pipe().ok()?;
         let mut client = Client::new(FdTransport::default());
-        if let Ok(fd) = connector() {
-            client.transport_mut().set(fd);
-            let _ = client.hello();
+        match connector() {
+            Ok(fd) => {
+                client.transport_mut().set(fd);
+                let _ = client.hello();
+                log::info("nicm: connected to datad, readiness question sent");
+            }
+            Err(e) => log::info(&format!("nicm: cannot connect to datad: {e}")),
         }
         let (tx, rx) = sync_channel(MAX_QUEUED_BATCHES);
         let shared = Arc::new(Shared {
@@ -247,8 +253,15 @@ impl Shared {
         }
     }
 
-    /// Send a command and wait for its answer. Never panics, never waits for ever.
+    /// Send a command and wait for its answer. Never panics, never waits for ever. A failure is written to
+    /// the log (`log::reply`).
     pub fn execute(&self, cmd: &NicmCmd) -> NicmReply {
+        let reply = self.execute_inner(cmd);
+        log::reply(cmd.kind, reply.status);
+        reply
+    }
+
+    fn execute_inner(&self, cmd: &NicmCmd) -> NicmReply {
         let mut g = lock(&self.inner);
         // While the library holds a Down it has not given the module yet, or has dropped notices and is about
         // to make the connection again, the module has not heard all that the daemon said. A number could be
@@ -431,6 +444,8 @@ impl Shared {
         let mut backoff = first;
         // the pause starts over only when a daemon answered: one that closes at once does not
         let mut answers = 0;
+        // the last readiness the daemon told, for the log
+        let mut told: Option<bool> = None;
         loop {
             let (stop, wake_r_fd) = {
                 let g = lock(&self.inner);
@@ -454,9 +469,17 @@ impl Shared {
                     Ok(fd) => {
                         g.client.transport_mut().set(fd);
                         let _ = g.client.reconnected();
+                        log::info("nicm: connected to datad again, readiness question sent");
                         backoff = backoff.saturating_mul(2).min(RETRY_MAX_MS);
                     }
-                    Err(_) => backoff = backoff.saturating_mul(2).min(RETRY_MAX_MS),
+                    Err(e) => {
+                        log::repeated(
+                            log::RECONNECT,
+                            u32::try_from(e.raw_os_error().unwrap_or(0)).unwrap_or(0),
+                            &format!("nicm: cannot connect to datad: {e}"),
+                        );
+                        backoff = backoff.saturating_mul(2).min(RETRY_MAX_MS);
+                    }
                 }
                 continue;
             }
@@ -498,6 +521,14 @@ impl Shared {
                     if g.client.ready_count() != answers {
                         answers = g.client.ready_count();
                         backoff = first;
+                        let ready = g.client.ready();
+                        if ready != told {
+                            told = ready;
+                            log::info(match ready {
+                                Some(true) => "nicm: datad says it is ready",
+                                _ => "nicm: datad says it is not ready",
+                            });
+                        }
                     }
                     if g.client.transport_mut().is_dead() {
                         notices.extend(give_up(&mut g));

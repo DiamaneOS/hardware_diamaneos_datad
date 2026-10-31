@@ -35,6 +35,7 @@
 pub mod abi;
 pub mod command;
 pub mod conn;
+pub mod log;
 pub mod restart;
 pub mod state;
 pub mod sys;

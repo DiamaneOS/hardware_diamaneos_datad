@@ -22,6 +22,8 @@ rust_ffi_shared {
         "libdataos_nicm_abi",
         "liblibc",
     ],
+    // log.rs and sys.rs write to logd through liblog
+    shared_libs: ["liblog"],
     stem: "libnicm",
     // Everything is linked in, std included. The library is loaded into qcrilNrd and must not need a
     // libstd.dylib.so or a libdataos_wire.dylib.so next to it (the default of rustlibs is the dylib).

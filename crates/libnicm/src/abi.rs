@@ -63,6 +63,9 @@ pub fn register_with(cb: Callback, user: UserData, connector: Connector) -> *mut
         Some(s) => Arc::clone(s),
         None => {
             let Some(s) = Shared::start(connector) else {
+                crate::log::info(
+                    "nicm: the data module registered, but the connection could not be started",
+                );
                 return std::ptr::null_mut();
             };
             g.shared = Some(Arc::clone(&s));
@@ -70,8 +73,10 @@ pub fn register_with(cb: Callback, user: UserData, connector: Connector) -> *mut
         }
     };
     let Some(id) = shared.register(cb, user) else {
+        crate::log::info("nicm: registration of the data module refused, too many");
         return std::ptr::null_mut();
     };
+    crate::log::info("nicm: the data module registered");
     let handle = Box::into_raw(Box::new([0u64; 8]));
     g.handles.push((handle as usize, id));
     handle.cast()

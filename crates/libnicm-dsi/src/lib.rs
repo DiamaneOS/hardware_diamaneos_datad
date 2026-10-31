@@ -43,3 +43,4 @@
 pub mod abi;
 pub mod glue;
 pub mod layout;
+pub mod log;

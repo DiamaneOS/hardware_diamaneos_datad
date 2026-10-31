@@ -15,7 +15,8 @@ rust_ffi_shared {
     srcs: ["src/lib.rs", "clippy.toml"],
     edition: "2021",
     rustlibs: ["libdataos_nicm_abi"],
-    shared_libs: ["libnicm"],
+    // libnicm for the connection, liblog for log.rs
+    shared_libs: ["libnicm", "liblog"],
     stem: "libnicm_dsi",
     // Everything is linked in, std included. The library is loaded into qcrilNrd and must not need a
     // libstd.dylib.so or a libdataos_wire.dylib.so next to it (the default of rustlibs is the dylib).

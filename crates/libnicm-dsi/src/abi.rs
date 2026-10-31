@@ -424,6 +424,30 @@ pub fn install(abi: Option<Arc<dyn DsiAbi>>) {
     *INSTALLED.lock().unwrap_or_else(PoisonError::into_inner) = abi;
 }
 
+#[cfg(target_os = "android")]
+extern "C" {
+    /// liblog (`shared_libs` of the Android.bp).
+    fn __android_log_write(
+        prio: c_int,
+        tag: *const std::ffi::c_char,
+        text: *const std::ffi::c_char,
+    ) -> c_int;
+}
+
+/// One line to logd at the information level, tag `nicm_dsi`. Nothing happens off Android (the host tests). A
+/// line is cut at 1000 bytes, and a zero byte in it is left out.
+pub fn log_info(text: &str) {
+    #[cfg(target_os = "android")]
+    {
+        let mut line: Vec<u8> = text.bytes().filter(|b| *b != 0).take(1000).collect();
+        line.push(0);
+        // SAFETY: the tag and the line are NUL-terminated, live through the call, and liblog only reads them.
+        let _ = unsafe { __android_log_write(4, c"nicm_dsi".as_ptr(), line.as_ptr().cast()) };
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = text;
+}
+
 extern "C" {
     /// From `libnicm.so`. Soong links this library against it (`shared_libs`).
     fn nicm_send_client_cmd(hndl: *mut c_void, cmd: *const NicmCmd, reply: *mut NicmReply)
@@ -473,10 +497,14 @@ fn call_current(op: Op, args: [usize; 5]) -> Option<usize> {
 }
 
 fn dispatch(op: Op, args: [usize; 5]) -> usize {
+    crate::log::first_call();
     if !abi_enabled() {
+        crate::log::refused(op, "the layouts of the data module are not verified");
         return FAIL;
     }
-    call_current(op, args).unwrap_or(FAIL)
+    let result = call_current(op, args).unwrap_or(FAIL);
+    crate::log::answered(op, result);
+    result
 }
 
 /// The refusal in the form of the prototype: -1 for an `int`.
