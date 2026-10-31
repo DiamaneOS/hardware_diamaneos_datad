@@ -2960,3 +2960,76 @@ fn a_call_that_came_up_while_the_question_was_open_keeps_the_link() {
         assert_eq!(s.links_held(c), 2);
     }
 }
+
+// ---- what the log gets ------------------------------------------------------------------------------------------
+
+#[test]
+fn the_readiness_question_is_traced_for_the_first_eight_answers_and_then_for_each_power_of_two() {
+    use dataos_datacore::Trace;
+    let mut s = server();
+    // the library says Hello at once (that is the first answer), and then the data module asks every
+    // hundred milliseconds while the daemon is not ready (a day has 864000)
+    let c = accept(&mut s);
+    for _ in 1..1100 {
+        s.request(1, c, Request::Hello);
+    }
+    let counts: Vec<u32> = s
+        .engine()
+        .take_trace()
+        .into_iter()
+        .filter_map(|t| match t {
+            Trace::HelloAnswered {
+                ready: false,
+                count,
+            } => Some(count),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        counts,
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 16, 32, 64, 128, 256, 512, 1024]
+    );
+    // the first answer of the other kind is traced at once
+    modem_up(&mut s);
+    s.engine().take_trace();
+    s.request(2, c, Request::Hello);
+    assert!(s.engine().take_trace().contains(&Trace::HelloAnswered {
+        ready: true,
+        count: 1
+    }));
+}
+
+#[test]
+fn a_refused_request_is_traced_with_its_name_and_code() {
+    use dataos_datacore::Trace;
+    let mut s = server();
+    let c = accept(&mut s);
+    s.engine().take_trace();
+    // not ready: the route lookup is refused
+    let r = lookup(&mut s, c, 7, internet(Family::V4));
+    assert_eq!(code_of(&r), ResultCode::NotReady);
+    assert!(s.engine().take_trace().contains(&Trace::Refused {
+        request: "route lookup",
+        code: "NotReady",
+        count: 1
+    }));
+    // an answer that is no refusal leaves no trace of one
+    modem_up(&mut s);
+    s.engine().take_trace();
+    let r = lookup(&mut s, c, 8, internet(Family::V4));
+    assert_eq!(code_of(&r), ResultCode::Ok);
+    assert!(!s
+        .engine()
+        .take_trace()
+        .iter()
+        .any(|t| matches!(t, Trace::Refused { .. })));
+}
+
+#[test]
+fn the_daemon_becoming_ready_is_traced() {
+    use dataos_datacore::Trace;
+    let mut s = server();
+    s.engine().take_trace();
+    modem_up(&mut s);
+    assert!(s.engine().take_trace().contains(&Trace::ReadyChanged(true)));
+}

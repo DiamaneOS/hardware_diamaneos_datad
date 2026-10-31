@@ -70,6 +70,21 @@ That list is from the code and the standard library, not from a run. The filter 
 logs what it would refuse, the refusals of an argument of `socket`, `ioctl` and `fcntl` included) until a run on the phone (bring-up, a call, a modem restart, a marker write) shows nothing
 missing. Then `main.rs` sets `Action::Errno`.
 
+## Looking at a run
+
+The daemon and the two libraries say what they do at the information level, and none of the lines has an
+identifier of a phone, a SIM, a network or a peer.
+
+- `logcat -s datad nicm nicm_dsi` has the lines: the start of the daemon, the modem's data services coming and going,
+  every step of the bring-up with the modem's answer (QMI error code), the data module connecting, the answers to its
+  readiness question and every request that is refused. A question that repeats every hundred milliseconds is written
+  for the first eight times and then for each power of two, with its count.
+- `/dev/datad/status` (as root, `cat`) has the last 48 lines of the daemon with the time of the kernel log in front, for
+  the first minutes of a run when the log buffer has rolled over. The directory is tmpfs, so a reboot clears it.
+- The data module fails every data call with its cause `OEM_DCFAILCAUSE_4` (0x1004) until its init has finished, and
+  its init waits for the readiness question to be answered with a yes. A daemon that is not ready says so in both places
+  above, and the bring-up line before it names the step that did not finish.
+
 ## Proving the wall in a platform build
 
 The wall is the forbid lints in each `lib.rs` and the `disallowed-methods` list in each `clippy.toml`. On a host,

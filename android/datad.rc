@@ -16,6 +16,7 @@
 #   design does not need (the wakelock is not taken).
 # - No standard output or error (init gives the daemon none). Its own lines go to logd through liblog (tag
 #   datad, crates/datad-rt/src/log.rs), so they are in logcat on a user build, and carry no identifier.
+#   The last 48 of them are also in /dev/datad/status (crates/datad-rt/src/report.rs), a tmpfs file for root.
 # - Not critical: a crash must never reboot the phone. init restarts it, the library in
 #   the radio daemon reconnects and tells the data module to start over (the restart
 #   protocol of the stock nicmd), so a crash is a short data outage.

@@ -12,6 +12,7 @@
 use crate::convert;
 use crate::table::{self, Dead, Proc, Row};
 use dataos_datacore::engine::{Engine, Qmi, ServiceEvent};
+use dataos_datacore::trace::{self, Trace};
 use dataos_datacore::Look;
 use dataos_datacore::{
     CallId, ClientId, Event, Family, LookupHint, LookupQuery, Priority, StartError,
@@ -330,6 +331,10 @@ pub struct Server<Q: Qmi, N: NetOps> {
     last_saved: Vec<u8>,
     boot: String,
     save_failures: u32,
+    /// Readiness questions answered so far, not ready and ready, and requests refused, by request and code.
+    /// They only decide which lines go to the log.
+    hello_answers: [u32; 2],
+    refusals: BTreeMap<(&'static str, u8), u32>,
 }
 
 /// Questions about links that have not come up that may be open at once. The rest of the engine's
@@ -370,6 +375,8 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
             last_saved: Vec::new(),
             boot: String::new(),
             save_failures: 0,
+            hello_answers: [0; 2],
+            refusals: BTreeMap::new(),
         }
     }
 
@@ -878,6 +885,7 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
         let ready = self.engine.is_ready();
         if ready != self.last_ready {
             self.last_ready = ready;
+            self.engine.trace(Trace::ReadyChanged(ready));
             for c in self.conns.values_mut() {
                 c.queue(Notify::Ready { ready });
             }
@@ -1141,7 +1149,9 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
         // the links of an earlier instance are taken back before the first lookup can take one
         self.restore_when_ready(now);
         let hello = matches!(req, Request::Hello);
+        let request = request_name(&req);
         let reply = self.handle(now, conn, req);
+        self.trace_reply(request, &reply);
         if let Some(c) = self.conns.get_mut(&conn) {
             for n in reply {
                 c.queue(n);
@@ -1152,6 +1162,46 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
             self.deliver(conn);
         }
         self.after_engine(now);
+    }
+
+    /// Write down the readiness answer, and every refusal, to the log. A question that repeats (the data module
+    /// asks every hundred milliseconds until the daemon is ready) is written for the first eight and then for
+    /// each power of two, with the count, so the log has every kind of answer and no flood.
+    fn trace_reply(&mut self, request: &'static str, reply: &[Notify]) {
+        for n in reply {
+            match n {
+                Notify::HelloAck { ready } => {
+                    let slot = self.hello_answers.get_mut(usize::from(*ready));
+                    if let Some(count) = slot {
+                        *count = count.saturating_add(1);
+                        if trace::due(*count) {
+                            let t = Trace::HelloAnswered {
+                                ready: *ready,
+                                count: *count,
+                            };
+                            self.engine.trace(t);
+                        }
+                    }
+                }
+                Notify::Done { code, .. }
+                | Notify::RouteReply { code, .. }
+                | Notify::MtuReply { code, .. }
+                    if *code != ResultCode::Ok =>
+                {
+                    let count = self.refusals.entry((request, code.code())).or_insert(0);
+                    *count = count.saturating_add(1);
+                    if trace::due(*count) {
+                        let t = Trace::Refused {
+                            request,
+                            code: code_name(*code),
+                            count: *count,
+                        };
+                        self.engine.trace(t);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     fn handle(&mut self, now: u64, conn: ConnId, req: Request) -> Vec<Notify> {
@@ -1841,6 +1891,32 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
 }
 
 /// A route reply that names no link.
+/// What a request is called in the log.
+fn request_name(r: &Request) -> &'static str {
+    match r {
+        Request::Hello => "readiness question",
+        Request::RouteLookup { .. } => "route lookup",
+        Request::MatchingCall { .. } => "matching call",
+        Request::LinkRelease { .. } => "link release",
+        Request::QueryMtu { .. } => "mtu query",
+        Request::ScreenState { .. } => "screen state",
+    }
+}
+
+fn code_name(c: ResultCode) -> &'static str {
+    match c {
+        ResultCode::Ok => "Ok",
+        ResultCode::Invalid => "Invalid",
+        ResultCode::NoLink => "NoLink",
+        ResultCode::NoSuchLink => "NoSuchLink",
+        ResultCode::TooMany => "TooMany",
+        ResultCode::BadState => "BadState",
+        ResultCode::NotReady => "NotReady",
+        ResultCode::Unsupported => "Unsupported",
+        ResultCode::NoMatch => "NoMatch",
+    }
+}
+
 fn refusal(txn: u32, code: ResultCode) -> Notify {
     Notify::RouteReply {
         txn,

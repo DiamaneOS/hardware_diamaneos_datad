@@ -27,9 +27,11 @@ mod linux {
     use dataos_datad_rt::clock::MonotonicClock;
     use dataos_datad_rt::poll::SysPoller;
     use dataos_datad_rt::qrtr::QrtrSockets;
+    use dataos_datad_rt::report::Reporter;
     use dataos_datad_rt::unix::UnixIpc;
     use dataos_datad_rt::{ids, kernel, log, seccomp, signals};
-    use dataos_netcfg::linux::LinuxNet;
+    use dataos_netcfg::linux::{LinuxNet, DEFAULT_STATE_DIR};
+    use std::cell::RefCell;
     use std::io;
 
     /// The name of the socket in the rc file (`socket datad seqpacket ...`).
@@ -40,27 +42,46 @@ mod linux {
     const SECCOMP: seccomp::Action = seccomp::Action::Log;
 
     pub fn run() -> io::Result<()> {
+        let report = RefCell::new(Reporter::new(DEFAULT_STATE_DIR));
         // the first line opens the socket to logd, which the filter would not let the daemon open later, and it does
         // so whatever log.tag properties say
-        log::open("starting");
+        report.borrow_mut().open("starting");
         // real, effective and saved IDs, user and group: none may be root's
-        ids::refuse_root()?;
+        stage(&report, "identity", ids::refuse_root())?;
         // the identity of a peer is its pidfd, which has an inode of its own from Linux 6.9
-        kernel::refuse_before(kernel::PIDFD_IDENTITY)?;
+        stage(
+            &report,
+            "kernel",
+            kernel::refuse_before(kernel::PIDFD_IDENTITY),
+        )?;
         // everything that needs a socket of a kind the filter will not allow later
-        let ipc = UnixIpc::inherited(SOCKET)?;
-        let net = LinuxNet::open()?;
+        let ipc = stage(&report, "control socket", UnixIpc::inherited(SOCKET))?;
+        let net = stage(&report, "device netlink socket", LinuxNet::open())?;
         let link = QmiLink::new(QrtrSockets::new());
         let engine = Engine::new(Config::default(), link, net);
         let mut daemon = Daemon::new(Server::new(ServerConfig::default(), engine), ipc);
-        signals::install()?;
-        seccomp::install(SECCOMP)?;
+        stage(&report, "signals", signals::install())?;
+        stage(&report, "syscall filter", seccomp::install(SECCOMP))?;
+        report.borrow_mut().say(match SECCOMP {
+            seccomp::Action::Log => "running, syscall filter in log mode",
+            _ => "running, syscall filter enforcing",
+        });
         daemon.run(
             &mut MonotonicClock::new(),
             &mut SysPoller,
             &signals::stop_requested,
             &mut |note| log::warn(&format!("note: {note:?}")),
+            &mut |trace| report.borrow_mut().trace(trace),
         );
         Ok(())
+    }
+
+    /// One stage of the start: its result is said, and a failure ends the start.
+    fn stage<T>(report: &RefCell<Reporter>, what: &str, result: io::Result<T>) -> io::Result<T> {
+        match &result {
+            Ok(_) => report.borrow_mut().say(&format!("{what}: ok")),
+            Err(e) => report.borrow_mut().say(&format!("{what}: failed: {e}")),
+        }
+        result
     }
 }

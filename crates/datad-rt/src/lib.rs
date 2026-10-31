@@ -24,6 +24,7 @@ pub mod kernel;
 pub mod log;
 pub mod poll;
 pub mod qrtr;
+pub mod report;
 pub mod seccomp;
 pub mod signals;
 pub mod sock;

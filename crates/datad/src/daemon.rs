@@ -11,7 +11,7 @@ use crate::outbox::{Dropped, Outbox, Sent};
 use crate::server::{ConnId, Server};
 use crate::table::Proc;
 use crate::transport::{LinkStats, QmiLink, Qrtr};
-use dataos_datacore::Note;
+use dataos_datacore::{Note, Trace};
 use dataos_netcfg::NetOps;
 use dataos_wire::{IfaceEvent, Notify};
 use std::collections::BTreeMap;
@@ -113,6 +113,11 @@ impl<Q: Qrtr, N: NetOps, I: Ipc> Daemon<Q, N, I> {
         self.server.engine().take_notes()
     }
 
+    /// What the host writes to the log. They carry no identifiers.
+    pub fn take_trace(&mut self) -> Vec<Trace> {
+        self.server.engine().take_trace()
+    }
+
     /// The descriptors to wait on.
     pub fn fds(&mut self) -> Vec<RawFd> {
         let mut fds = self.ipc.fds();
@@ -167,19 +172,24 @@ impl<Q: Qrtr, N: NetOps, I: Ipc> Daemon<Q, N, I> {
         }
     }
 
-    /// Run until `stop` says so. What the engine wants written down goes to `note`.
+    /// Run until `stop` says so. What the engine wants written down goes to `note`, and what the host logs at the
+    /// information level (the modem, the bring-up, the handshake with the data module and every refusal) to `trace`.
     pub fn run(
         &mut self,
         clock: &mut impl Clock,
         poller: &mut impl Poller,
         stop: &dyn Fn() -> bool,
         note: &mut dyn FnMut(Note),
+        trace: &mut dyn FnMut(Trace),
     ) {
         while !stop() {
             let now = clock.now_ms();
             let wait = if self.step(now) { 0 } else { self.wait_ms(now) };
             for n in self.take_notes() {
                 note(n);
+            }
+            for t in self.take_trace() {
+                trace(t);
             }
             let fds = self.fds();
             if poller.wait(&fds, wait).is_err() {
@@ -202,10 +212,12 @@ impl<Q: Qrtr, N: NetOps, I: Ipc> Daemon<Q, N, I> {
                     Ok(conn) => {
                         self.conns.insert(conn, id);
                         self.stats.accepted = self.stats.accepted.saturating_add(1);
+                        self.server.engine().trace(Trace::ClientConnected);
                     }
                     Err(_) => {
                         self.ipc.close(id);
                         self.stats.rejected = self.stats.rejected.saturating_add(1);
+                        self.server.engine().trace(Trace::ClientRejected);
                     }
                 },
                 Ok(None) => return false,
@@ -312,12 +324,13 @@ impl<Q: Qrtr, N: NetOps, I: Ipc> Daemon<Q, N, I> {
         };
         self.ipc.close(id);
         self.server.close(now, conn);
-        let counter = match cause {
-            Cause::Protocol => &mut self.stats.closed_protocol,
-            Cause::Peer => &mut self.stats.closed_by_peer,
-            Cause::Fault => &mut self.stats.closed_fault,
-            Cause::Blocked => &mut self.stats.closed_blocked,
+        let (counter, why) = match cause {
+            Cause::Protocol => (&mut self.stats.closed_protocol, "protocol error"),
+            Cause::Peer => (&mut self.stats.closed_by_peer, "closed by the peer"),
+            Cause::Fault => (&mut self.stats.closed_fault, "socket fault"),
+            Cause::Blocked => (&mut self.stats.closed_blocked, "peer too slow"),
         };
         *counter = counter.saturating_add(1);
+        self.server.engine().trace(Trace::ClientClosed(why));
     }
 }

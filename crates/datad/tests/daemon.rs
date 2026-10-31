@@ -413,6 +413,7 @@ fn run_for(d: &mut Rig, steps: u32, fail: bool) -> Vec<u64> {
             n.get() > steps
         },
         &mut |_| (),
+        &mut |_| (),
     );
     poller.waits
 }
@@ -458,6 +459,7 @@ fn what_the_engine_wants_written_down_goes_to_the_note_callback() {
             n.get() > 8
         },
         &mut |note| notes.push(note),
+        &mut |_| (),
     );
     assert!(!notes.is_empty());
     assert!(notes
