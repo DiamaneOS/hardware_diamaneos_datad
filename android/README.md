@@ -1,12 +1,8 @@
 # Android integration
 
 The Soong modules, the device wiring and the policy of the open data stack. Everything is behind one build switch
-of the device, `DIAMANEOS_DATAD` (default false). A build without it is the stock data stack: the Soong modules do not
+of the device, `DIAMANEOS_DATAD`. A build without it is the stock data stack: the Soong modules do not
 exist, the policy is not added and the product does not change.
-Checked so far: the policy compiles with the build's checkpolicy and secilc including every neverallow, the
-recovery policy (`sepolicy.recovery`) compiles with it, seven planted violations are refused, the Soong
-modules compile with clippy on the builder, the product config is read on the builder with the switch off and on. Nothing
-has run on a phone.
 
 - `Android.bp` has the init rc module and the Soong default that switches the Rust modules off. The modules are next to
   their crates (`crates/*/Android.bp`). They take `diamaneos_datad_defaults`, which is `enabled: false` unless the Soong

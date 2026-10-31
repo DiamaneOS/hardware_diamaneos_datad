@@ -61,7 +61,7 @@ with `NET_ADMIN` only, behind a syscall filter and its own SELinux domain.
 
 ## Selecting it in a device build
 
-Everything is behind one build switch of the device, `DIAMANEOS_DATAD` (default false). Without it the build is
+Everything is behind one build switch of the device, `DIAMANEOS_DATAD`. Without it the build is
 the stock data stack: the Soong modules do not exist, the policy is not added and the product does not change.
 With it on, the device build sets the Soong config that enables the modules, adds the policy directory and the
 vendor UID, installs `datad` with its init rc, and replaces `libnicm.so` and `libnicm_dsi.so` at the stock paths.
