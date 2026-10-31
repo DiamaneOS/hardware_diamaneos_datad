@@ -4,6 +4,7 @@
 //! number is made up. Emergency behaviour is covered by simulation only.
 use dataos_datacore::engine::ServiceEvent;
 use dataos_datacore::sim::{pump, SimModem};
+use dataos_datacore::trace::Answer;
 use dataos_datacore::*;
 use dataos_netcfg::fake::Call as NetCall;
 use dataos_netcfg::{FakeNet, NetError, NetOps, PipeState, SetupMarker, SharedNet, STOCK_FEATURES};
@@ -63,8 +64,9 @@ fn bringup_sets_data_format_opens_port_sets_up_ipa_and_registers_every_mux() {
     assert!(!e.is_ready());
     pump(&mut e, 0);
     assert!(e.is_ready());
-    let ids: Vec<u16> = e.qmi_mut().requests.iter().map(|(_, m)| *m).collect();
-    assert_eq!(ids, vec![wda::SET_DATA_FORMAT, dpm::OPEN_PORT]);
+    // the port first, then its data format (both messages are 0x20, so the services say which is which)
+    let services: Vec<u8> = e.qmi_mut().frames.iter().map(|(s, _)| *s).collect();
+    assert_eq!(services, vec![dpm::SERVICE, wda::SERVICE]);
 
     let n = Config::default().link_count as usize;
     let calls = net_calls(&e);
@@ -461,15 +463,19 @@ fn modem_restart_ends_calls_and_waiting_calls_survive() {
 
 #[test]
 fn bringup_is_retried_after_a_failure() {
-    let mut e = engine();
-    e.qmi_mut().refuse_service.push(wda::SERVICE);
-    e.on_service_event(0, ServiceEvent::ModemUp);
-    assert!(!e.is_ready());
-    assert_eq!(e.next_deadline(), Some(2_000));
-    e.qmi_mut().refuse_service.clear();
-    e.tick(2_000);
-    pump(&mut e, 2_000);
-    assert!(e.is_ready());
+    // no client of the service, at the first step or at the second
+    for service in [dpm::SERVICE, wda::SERVICE] {
+        let mut e = engine();
+        e.qmi_mut().refuse_service.push(service);
+        e.on_service_event(0, ServiceEvent::ModemUp);
+        pump(&mut e, 0);
+        assert!(!e.is_ready());
+        assert_eq!(e.next_deadline(), Some(2_000));
+        e.qmi_mut().refuse_service.clear();
+        e.tick(2_000);
+        pump(&mut e, 2_000);
+        assert!(e.is_ready());
+    }
 }
 
 #[test]
@@ -1583,8 +1589,9 @@ fn a_device_already_set_up_may_refuse_the_data_format_and_the_port_again() {
         let mut a = daemon_on(&net);
         up_at(&mut a, 0);
         drop(a);
-        // the modem keeps the state of the first daemon and refuses a second request
+        // the modem keeps the state of the first daemon, its open port too, and refuses a second request
         let mut b = daemon_on(&net);
+        b.qmi_mut().format_without_port = true;
         b.qmi_mut().reject.push((service, msg));
         up_at(&mut b, 10);
         assert!(b.is_ready(), "refusal of {msg:#x} passed over");
@@ -1599,10 +1606,12 @@ fn a_device_already_set_up_may_leave_the_port_request_unanswered() {
     up_at(&mut a, 0);
     drop(a);
     let mut b = daemon_on(&net);
+    b.qmi_mut().format_without_port = true;
     b.qmi_mut().mute_service.push(dpm::SERVICE);
     up_at(&mut b, 10);
     assert!(!b.is_ready());
     b.tick(10 + 10_000);
+    pump(&mut b, 10 + 10_000);
     assert!(b.is_ready(), "passed over after the deadline");
 }
 
@@ -2616,4 +2625,121 @@ fn a_restarted_daemon_that_finds_the_device_set_up_keeps_the_links_and_their_add
         15,
         "every link exists, none twice"
     );
+}
+
+// ---- the trace of the bring-up -------------------------------------------------------------------------------
+
+fn traced_bringup(e: &mut E) -> Vec<Trace> {
+    e.on_service_event(0, ServiceEvent::ModemUp);
+    pump(e, 0);
+    e.take_trace()
+}
+
+#[test]
+fn the_port_is_opened_before_its_data_format_is_asked_and_the_trace_says_so() {
+    // the modem answers a data format for a port nobody opened with QMI error 0x46, invalid operation
+    // (the first run on a phone), so the steps go in the order of stock nicmd
+    let mut e = engine();
+    assert_eq!(
+        traced_bringup(&mut e),
+        vec![
+            Trace::ModemUp,
+            Trace::BringupStart(1),
+            Trace::StepSent(BringupStep::Port),
+            Trace::StepAnswered(BringupStep::Port, Answer::Accepted),
+            Trace::StepSent(BringupStep::Format),
+            Trace::StepAnswered(BringupStep::Format, Answer::Accepted),
+            Trace::Ready,
+        ]
+    );
+    assert!(e.is_ready());
+}
+
+#[test]
+fn a_refused_step_is_traced_with_the_qmi_error_and_the_next_attempt() {
+    for (service, msg, step) in [
+        (dpm::SERVICE, dpm::OPEN_PORT, BringupStep::Port),
+        (wda::SERVICE, wda::SET_DATA_FORMAT, BringupStep::Format),
+    ] {
+        let mut e = engine();
+        e.qmi_mut().reject.push((service, msg));
+        let trace = traced_bringup(&mut e);
+        assert!(!e.is_ready());
+        assert_eq!(
+            &trace[trace.len() - 2..],
+            [
+                Trace::StepAnswered(step, Answer::Refused(3)),
+                Trace::RetryIn(2_000)
+            ]
+        );
+        assert_eq!(trace[0], Trace::ModemUp);
+    }
+}
+
+#[test]
+fn a_silent_step_is_traced_when_its_time_runs_out() {
+    let mut e = engine();
+    e.qmi_mut().mute_service.push(dpm::SERVICE);
+    traced_bringup(&mut e);
+    e.tick(10_000);
+    assert_eq!(
+        e.take_trace(),
+        vec![
+            Trace::StepTimedOut(BringupStep::Port),
+            Trace::RetryIn(2_000)
+        ]
+    );
+}
+
+#[test]
+fn a_device_that_cannot_be_asked_or_brought_up_is_traced() {
+    let mut e = engine();
+    e.net_mut().fail_next = Some(("ipa_endpoint", NetError::Os(1)));
+    let trace = traced_bringup(&mut e);
+    assert_eq!(
+        trace,
+        vec![
+            Trace::ModemUp,
+            Trace::BringupStart(1),
+            Trace::EndpointFailed(NetError::Os(1)),
+            Trace::RetryIn(2_000)
+        ]
+    );
+}
+
+#[test]
+fn the_simulated_modem_refuses_a_data_format_before_the_port_is_open_like_the_real_one() {
+    use dataos_datacore::engine::Qmi;
+    let mut modem = SimModem::new();
+    let request = dataos_qmi::wda::SetDataFormat::stock((4, 1), 64844, 63)
+        .encode(1)
+        .unwrap();
+    let client = modem.open_client(wda::SERVICE).unwrap();
+    modem.send(client, &request).unwrap();
+    let (_, answer) = modem.inbox.pop_front().unwrap();
+    let status = Frame::parse(&answer).unwrap().status().unwrap();
+    assert!(!status.is_ok());
+    assert_eq!(status.error, 0x46);
+    // after the port is open it is taken, and a restart of the modem closes the port again
+    let port = dataos_qmi::dpm::open_hardware_ports(
+        2,
+        &[dataos_qmi::dpm::HardwarePort {
+            ep_type: 4,
+            iface: 1,
+            consumer: 2,
+            producer: 18,
+        }],
+    )
+    .unwrap();
+    let dpm_client = modem.open_client(dpm::SERVICE).unwrap();
+    modem.send(dpm_client, &port).unwrap();
+    modem.inbox.clear();
+    modem.send(client, &request).unwrap();
+    let (_, answer) = modem.inbox.pop_front().unwrap();
+    assert!(Frame::parse(&answer).unwrap().status().unwrap().is_ok());
+    modem.restart();
+    let client = modem.open_client(wda::SERVICE).unwrap();
+    modem.send(client, &request).unwrap();
+    let (_, answer) = modem.inbox.pop_front().unwrap();
+    assert_eq!(Frame::parse(&answer).unwrap().status().unwrap().error, 0x46);
 }

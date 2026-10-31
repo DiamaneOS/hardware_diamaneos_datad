@@ -24,6 +24,8 @@ pub mod engine;
 pub mod model;
 #[cfg(any(test, feature = "sim"))]
 pub mod sim;
+pub mod trace;
 
 pub use engine::{Config, Engine, Look, Note, Qmi, QmiError, ServiceEvent, Stats};
 pub use model::*;
+pub use trace::{Answer, BringupStep, Trace};

@@ -6,6 +6,7 @@
 //! milliseconds) must come from a clock that stops in suspend
 //! (`CLOCK_MONOTONIC`), or local deadlines fire right after a resume.
 use crate::model::*;
+use crate::trace::{Answer, BringupStep, Trace};
 use dataos_netcfg::{
     AddrFlags, IpaFormat, Ipv6Settings, NetError, NetOps, PipeState, PipeStatus, RmnetFlags,
     SetupMarker, STOCK_FEATURES,
@@ -17,6 +18,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 mod lookup;
 pub use lookup::MAX_LOOKUPS;
+
+/// Traces kept for the host between two passes of its loop.
+const MAX_TRACES: usize = 256;
 
 /// Boot ID that stands for "could not be read" in the marker.
 const UNKNOWN_BOOT: &str = "-";
@@ -359,6 +363,7 @@ pub struct Engine<Q: Qmi, N: NetOps> {
     modem_up: bool,
     ipa: IpaProgress,
     notes: Vec<Note>,
+    traces: Vec<Trace>,
     bringup: Bringup,
     events: Vec<Event>,
     now: u64,
@@ -371,6 +376,17 @@ pub struct Engine<Q: Qmi, N: NetOps> {
     endpoint: (u32, u32),
     /// The consumer and producer pipe numbers the driver reported.
     pipe_pair: (u32, u32),
+}
+
+/// How the modem answered, for the trace: the QMI error code when the result is a failure.
+fn answer_of(f: &Frame<'_>, accepted: bool) -> Answer {
+    if accepted {
+        return Answer::Accepted;
+    }
+    match f.status() {
+        Ok(s) if !s.is_ok() => Answer::Refused(s.error),
+        _ => Answer::Malformed,
+    }
 }
 
 impl<Q: Qmi, N: NetOps> Engine<Q, N> {
@@ -400,6 +416,7 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
             modem_up: false,
             ipa: IpaProgress::default(),
             notes: Vec::new(),
+            traces: Vec::new(),
             bringup: Bringup {
                 step: BStep::Idle,
                 wda: None,
@@ -446,6 +463,18 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
 
     pub fn take_notes(&mut self) -> Vec<Note> {
         std::mem::take(&mut self.notes)
+    }
+
+    /// Something the host writes to the log at the information level (see `Trace`). The host takes them
+    /// in every pass of its loop, so the list stays short, and it holds at most `MAX_TRACES`.
+    pub fn trace(&mut self, t: Trace) {
+        if self.traces.len() < MAX_TRACES {
+            self.traces.push(t);
+        }
+    }
+
+    pub fn take_trace(&mut self) -> Vec<Trace> {
+        std::mem::take(&mut self.traces)
     }
 
     pub fn take_events(&mut self) -> Vec<Event> {
@@ -534,9 +563,11 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
                     return;
                 }
                 self.modem_up = true;
+                self.trace(Trace::ModemUp);
                 self.start_bringup();
             }
             ServiceEvent::ModemDown => {
+                self.trace(Trace::ModemDown);
                 self.modem_up = false;
                 self.ready = false;
                 self.stop_bringup();
@@ -659,39 +690,25 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
     fn start_bringup(&mut self) {
         self.stop_bringup();
         self.load_progress();
-        // Ask the device which endpoint it is and which pipes it has, and bring it up, in the order stock nicmd
-        // does after a modem restart. The numbers go to the modem and they are the driver's, not ours.
+        self.trace(Trace::BringupStart(self.bringup.attempts.saturating_add(1)));
+        // Ask the device which endpoint it is and which pipes it has, and bring it up, then open the data port
+        // and set its data format, in the order stock nicmd does after a modem restart (`modemIS`). The numbers
+        // go to the modem and they are the driver's, not ours.
         match self.net.ipa_endpoint(&self.cfg.parent) {
             Ok(ep) => {
                 self.endpoint.1 = ep.epid;
                 self.pipe_pair = (ep.consumer, ep.producer);
             }
-            Err(_) => return self.bringup_failed(),
+            Err(e) => {
+                self.trace(Trace::EndpointFailed(e));
+                return self.bringup_failed();
+            }
         }
-        if self.net.set_link(&self.cfg.parent, true, None).is_err() {
+        if let Err(e) = self.net.set_link(&self.cfg.parent, true, None) {
+            self.trace(Trace::LinkUpFailed(e));
             return self.bringup_failed();
         }
-        let client = match self.qmi.open_client(wda::SERVICE) {
-            Ok(c) => c,
-            Err(_) => return self.bringup_failed(),
-        };
-        self.clients.insert(client, Owner::Wda);
-        self.bringup.wda = Some(client);
-        let txn = self.next_txn();
-        let req = wda::SetDataFormat::stock(
-            self.endpoint,
-            self.cfg.dl_max_size,
-            self.cfg.dl_max_datagrams,
-        )
-        .encode(txn);
-        match req {
-            Ok(b) if self.qmi.send(client, &b).is_ok() => {
-                self.bringup.step = BStep::Wda;
-                self.bringup.txn = txn;
-                self.bringup.deadline = Some(self.now.saturating_add(self.cfg.qmi_timeout_ms));
-            }
-            _ => self.bringup_failed(),
-        }
+        self.bringup_open_port();
     }
 
     /// Give up this attempt and try again later, with a growing delay.
@@ -705,6 +722,7 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
             .min(self.cfg.retry_max_ms);
         self.bringup.attempts = self.bringup.attempts.saturating_add(1);
         self.bringup.retry_at = Some(self.now.saturating_add(delay));
+        self.trace(Trace::RetryIn(delay));
     }
 
     fn bringup_rx(&mut self, owner: Owner, bytes: &[u8]) {
@@ -726,23 +744,26 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
             return;
         }
         match (owner, self.bringup.step) {
-            (Owner::Wda, BStep::Wda) => {
-                if wda::parse_set_data_format_response(&f).is_err() {
-                    if !self.modem_set_up() {
-                        return self.bringup_failed();
-                    }
-                    self.stats.bringup_refusals_passed =
-                        self.stats.bringup_refusals_passed.saturating_add(1);
-                }
-                self.bringup_open_port();
-            }
             (Owner::Dpm, BStep::Dpm) => {
-                if !f.status().map(|s| s.is_ok()).unwrap_or(false) {
+                let outcome = answer_of(&f, f.status().map(|s| s.is_ok()).unwrap_or(false));
+                self.trace(Trace::StepAnswered(BringupStep::Port, outcome));
+                if outcome != Answer::Accepted {
                     if !self.modem_set_up() {
                         return self.bringup_failed();
                     }
-                    self.stats.bringup_refusals_passed =
-                        self.stats.bringup_refusals_passed.saturating_add(1);
+                    self.pass_over(BringupStep::Port);
+                }
+                self.bringup_set_data_format();
+            }
+            (Owner::Wda, BStep::Wda) => {
+                let accepted = wda::parse_set_data_format_response(&f).is_ok();
+                let outcome = answer_of(&f, accepted);
+                self.trace(Trace::StepAnswered(BringupStep::Format, outcome));
+                if outcome != Answer::Accepted {
+                    if !self.modem_set_up() {
+                        return self.bringup_failed();
+                    }
+                    self.pass_over(BringupStep::Format);
                 }
                 self.finish_bringup();
             }
@@ -750,11 +771,16 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
         }
     }
 
-    /// Second bring-up step: open the hardware data port.
+    /// First bring-up step: open the hardware data port, as stock nicmd does before it talks to the data
+    /// format service (`NetDeviceManager::modemIS` calls `openModemPorts` and then makes the WDA client).
+    /// The modem answers a data format for a port that is not open with QMI error 0x46, invalid operation.
     fn bringup_open_port(&mut self) {
         let client = match self.qmi.open_client(dpm::SERVICE) {
             Ok(c) => c,
-            Err(_) => return self.bringup_failed(),
+            Err(_) => {
+                self.trace(Trace::StepUnavailable(BringupStep::Port));
+                return self.bringup_failed();
+            }
         };
         self.clients.insert(client, Owner::Dpm);
         self.bringup.dpm = Some(client);
@@ -770,21 +796,68 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
                 self.bringup.step = BStep::Dpm;
                 self.bringup.txn = txn;
                 self.bringup.deadline = Some(self.now.saturating_add(self.cfg.qmi_timeout_ms));
+                self.trace(Trace::StepSent(BringupStep::Port));
             }
-            _ => self.bringup_failed(),
+            _ => {
+                self.trace(Trace::StepUnavailable(BringupStep::Port));
+                self.bringup_failed();
+            }
+        }
+    }
+
+    /// A refusal or silence of a step is not an error when an earlier attempt or daemon set the device up.
+    fn pass_over(&mut self, step: BringupStep) {
+        self.stats.bringup_refusals_passed = self.stats.bringup_refusals_passed.saturating_add(1);
+        self.trace(Trace::StepPassedOver(step));
+    }
+
+    /// Second bring-up step: set the data format of the open port.
+    fn bringup_set_data_format(&mut self) {
+        let client = match self.qmi.open_client(wda::SERVICE) {
+            Ok(c) => c,
+            Err(_) => {
+                self.trace(Trace::StepUnavailable(BringupStep::Format));
+                return self.bringup_failed();
+            }
+        };
+        self.clients.insert(client, Owner::Wda);
+        self.bringup.wda = Some(client);
+        let txn = self.next_txn();
+        let req = wda::SetDataFormat::stock(
+            self.endpoint,
+            self.cfg.dl_max_size,
+            self.cfg.dl_max_datagrams,
+        )
+        .encode(txn);
+        match req {
+            Ok(b) if self.qmi.send(client, &b).is_ok() => {
+                self.bringup.step = BStep::Wda;
+                self.bringup.txn = txn;
+                self.bringup.deadline = Some(self.now.saturating_add(self.cfg.qmi_timeout_ms));
+                self.trace(Trace::StepSent(BringupStep::Format));
+            }
+            _ => {
+                self.trace(Trace::StepUnavailable(BringupStep::Format));
+                self.bringup_failed();
+            }
         }
     }
 
     /// A bring-up step got no answer in time.
     fn bringup_deadline(&mut self) {
+        let step = match self.bringup.step {
+            BStep::Dpm => BringupStep::Port,
+            BStep::Wda => BringupStep::Format,
+            BStep::Idle => return,
+        };
+        self.trace(Trace::StepTimedOut(step));
         if !self.modem_set_up() {
             return self.bringup_failed();
         }
-        self.stats.bringup_refusals_passed = self.stats.bringup_refusals_passed.saturating_add(1);
-        match self.bringup.step {
-            BStep::Wda => self.bringup_open_port(),
-            BStep::Dpm => self.finish_bringup(),
-            BStep::Idle => {}
+        self.pass_over(step);
+        match step {
+            BringupStep::Port => self.bringup_set_data_format(),
+            BringupStep::Format => self.finish_bringup(),
         }
     }
 
@@ -797,13 +870,15 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
         // its links may carry calls of the module that outlived the daemon. The stock daemon does not
         // touch those either, it flushes an address when the kernel reports the link down.
         let adopt = self.pipes_done();
-        if self.setup_ipa().is_err() {
+        if let Err(e) = self.setup_ipa() {
+            self.trace(Trace::SetupFailed(e));
             return self.bringup_failed();
         }
         self.reset_links(adopt);
         self.adopted = adopt;
         self.ready = true;
         self.bringup.attempts = 0;
+        self.trace(Trace::Ready);
         let waiting: Vec<CallId> = self
             .calls
             .values()

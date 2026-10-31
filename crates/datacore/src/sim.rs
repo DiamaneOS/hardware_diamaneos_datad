@@ -85,6 +85,10 @@ pub struct SimModem {
     /// one that another client started on its mux ID (`external_connect`).
     pub require_call: bool,
     external_up: Vec<u8>,
+    /// The real modem refuses a data format (QMI error 0x46, invalid operation) for a data port that no
+    /// Open Port request has opened. Set this to take the data format without it.
+    pub format_without_port: bool,
+    port_open: bool,
     /// Refuse to hand out clients of this service.
     pub refuse_service: Vec<u8>,
     /// Refuse every send (the socket of the client is gone).
@@ -252,10 +256,11 @@ impl SimModem {
         self.inbox.push_back((client, ind));
     }
 
-    /// Modem restart: all clients are gone.
+    /// Modem restart: all clients are gone and the data port is closed again.
     pub fn restart(&mut self) {
         self.clients.clear();
         self.inbox.clear();
+        self.port_open = false;
     }
 
     fn connected_ind(&self, family: Option<wds::IpFamily>) -> Vec<u8> {
@@ -372,6 +377,17 @@ impl Qmi for SimModem {
             return Ok(());
         }
         match (service, f.id) {
+            (wda::SERVICE, wda::SET_DATA_FORMAT)
+                if !self.port_open && !self.format_without_port =>
+            {
+                out.push(
+                    Builder::response(txn, f.id)
+                        .fail(0x0046)
+                        .unwrap()
+                        .build()
+                        .unwrap(),
+                )
+            }
             (wda::SERVICE, wda::SET_DATA_FORMAT) => out.push(
                 Builder::response(txn, f.id)
                     .ok()
@@ -381,7 +397,10 @@ impl Qmi for SimModem {
                     .build()
                     .unwrap(),
             ),
-            (dpm::SERVICE, dpm::OPEN_PORT) => out.push(ok(f.id)),
+            (dpm::SERVICE, dpm::OPEN_PORT) => {
+                self.port_open = true;
+                out.push(ok(f.id));
+            }
             (wds::SERVICE, wds::id::BIND_MUX_DATA_PORT) => {
                 let mux = f.tlv(0x11).map(|v| v[0]);
                 let nth = self.bind_mux_seen;

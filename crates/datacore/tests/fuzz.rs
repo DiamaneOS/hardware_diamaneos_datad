@@ -287,9 +287,9 @@ fn a_response_to_another_message_is_not_taken_for_the_answer() {
 #[test]
 fn the_bringup_answers_are_checked_for_message_and_transaction() {
     let mut e = new_engine();
-    e.qmi_mut().mute_service.push(wda::SERVICE);
+    e.qmi_mut().mute_service.push(dpm::SERVICE);
     e.on_service_event(0, ServiceEvent::ModemUp);
-    let c = e.qmi_mut().client_ids(wda::SERVICE)[0];
+    let c = e.qmi_mut().client_ids(dpm::SERVICE)[0];
     let txn = e.qmi_mut().last_txn[&c];
     // a good answer to another message, then a good message with another transaction
     let other = Builder::response(txn, id::STOP_NETWORK)
@@ -297,7 +297,7 @@ fn the_bringup_answers_are_checked_for_message_and_transaction() {
         .unwrap()
         .build()
         .unwrap();
-    let wrong_txn = Builder::response(txn.wrapping_add(1), wda::SET_DATA_FORMAT)
+    let wrong_txn = Builder::response(txn.wrapping_add(1), dpm::OPEN_PORT)
         .ok()
         .unwrap()
         .build()
@@ -306,15 +306,15 @@ fn the_bringup_answers_are_checked_for_message_and_transaction() {
     e.on_qmi(1, c, &wrong_txn);
     assert_eq!(e.stats().stale, 2);
     assert!(
-        e.qmi_mut().client_ids(dpm::SERVICE).is_empty(),
+        e.qmi_mut().client_ids(wda::SERVICE).is_empty(),
         "still on the first step"
     );
-    let right = Builder::response(txn, wda::SET_DATA_FORMAT)
+    let right = Builder::response(txn, dpm::OPEN_PORT)
         .ok()
         .unwrap()
         .build()
         .unwrap();
     e.qmi_mut().mute_service.clear();
     e.on_qmi(1, c, &right);
-    assert_eq!(e.qmi_mut().client_ids(dpm::SERVICE).len(), 1);
+    assert_eq!(e.qmi_mut().client_ids(wda::SERVICE).len(), 1);
 }
