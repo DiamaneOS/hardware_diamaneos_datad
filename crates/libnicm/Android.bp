@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//
+// Sketch, not built. Replaces the stock libnicm.so in the process of the radio
+// daemon: the connection of the data module to the interface manager, now a Unix
+// socket to datad. The soname and the exports (nicm_client_register,
+// nicm_client_release, nicm_send_client_cmd and the three vh_event_* stubs) must
+// be those the stock library has, because libdsi_netctrl.so and libnicm_dsi.so
+// have NEEDED entries for it. The lint wall holds here as in the shim crates:
+// see crates/wire/Android.bp for what the three properties do.
+rust_ffi_shared {
+    name: "libnicm",
+    defaults: ["diamaneos_datad_defaults"],
+    vendor: true,
+    crate_name: "nicm",
+    crate_root: "src/lib.rs",
+    srcs: ["src/lib.rs", "clippy.toml"],
+    edition: "2021",
+    rustlibs: [
+        "libdataos_wire",
+        "libdataos_nicm_compat",
+        "libdataos_nicm_abi",
+        "liblibc",
+    ],
+    stem: "libnicm",
+    // Everything is linked in, std included. The library is loaded into qcrilNrd and must not need a
+    // libstd.dylib.so or a libdataos_wire.dylib.so next to it (the default of rustlibs is the dylib).
+    prefer_rlib: true,
+    clippy_lints: "android",
+    lints: "vendor",
+    cargo_env_compat: true,
+    // a device build refuses the pair while STOCK_ABI_VERIFIED is false (nicm-abi/src/lib.rs)
+    cfgs: ["device_build"],
+}

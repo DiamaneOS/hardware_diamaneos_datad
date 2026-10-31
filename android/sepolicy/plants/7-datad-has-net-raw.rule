@@ -1,0 +1,2 @@
+# The daemon gets raw network access.
+allow diamaneos_datad self:capability net_raw;

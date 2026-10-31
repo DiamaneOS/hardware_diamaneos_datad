@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//
+// Sketch, not built. This library runs inside qcrilNrd (it is linked into the
+// replacement libdsi_netctrl.so), where Soong builds Rust with -C panic=abort.
+// So the lint wall of the crate must hold in the platform build, and each of the
+// three properties below is needed for that:
+//
+// - clippy_lints "android": under hardware/ and vendor/ Soong's default lint set is
+//   "vendor", which runs no clippy at all (build/soong/rust/config/lints.go).
+// - lints "vendor": the relaxed rustc set. The android set adds -D missing-docs.
+// - cargo_env_compat true: clippy-driver finds clippy.toml through CARGO_MANIFEST_DIR.
+//   Soong sets it only with this property, and it then points at the directory of this
+//   file, which is why this file sits next to clippy.toml.
+// - clippy.toml among the srcs, with crate_root naming the crate root: the clippy action reads
+//   the file, and Soong stops the build for a file it read that was not listed as an input
+//   ("Command depended on clippy.toml, which was not listed as an input"). With a crate_root
+//   the srcs are the files the crate may use, and the .rs files of the directory are added.
+//
+// android/README.md says how to prove in a platform build that the wall is on.
+rust_library {
+    name: "libdataos_wire",
+    defaults: ["diamaneos_datad_defaults"],
+    vendor: true,
+    crate_name: "dataos_wire",
+    crate_root: "src/lib.rs",
+    srcs: ["src/lib.rs", "clippy.toml"],
+    edition: "2021",
+    clippy_lints: "android",
+    lints: "vendor",
+    cargo_env_compat: true,
+}

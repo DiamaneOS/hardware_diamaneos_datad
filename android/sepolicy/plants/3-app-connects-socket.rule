@@ -1,0 +1,2 @@
+# An app connects to the control socket.
+allow untrusted_app diamaneos_datad:unix_stream_socket connectto;

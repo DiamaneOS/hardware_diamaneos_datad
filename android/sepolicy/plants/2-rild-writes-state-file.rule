@@ -1,0 +1,2 @@
+# The radio daemon writes the table of links, which it must not (a wrong link gives a call to the wrong process).
+allow rild diamaneos_datad_state:file write;

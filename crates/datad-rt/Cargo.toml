@@ -1,0 +1,22 @@
+[package]
+name = "dataos-datad-rt"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The sockets, the filter and the process setup of the data daemon. The logic is in dataos-datad.
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "datad"
+path = "src/main.rs"
+
+[dependencies]
+dataos-datad = { path = "../datad" }
+dataos-datacore = { path = "../datacore" }
+dataos-netcfg = { path = "../netcfg" }
+dataos-qmi = { path = "../qmi" }
+dataos-wire = { path = "../wire" }
+libc = "=0.2.174"

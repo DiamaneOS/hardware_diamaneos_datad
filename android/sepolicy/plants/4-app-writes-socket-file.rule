@@ -1,0 +1,2 @@
+# An app writes to the socket file.
+allow untrusted_app diamaneos_datad_socket:sock_file write;

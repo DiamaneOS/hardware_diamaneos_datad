@@ -1,0 +1,19 @@
+[package]
+name = "dataos-nicm-compat"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+# The only dependency of the code that runs inside qcrilNrd. A test keeps it so.
+[dependencies]
+dataos-wire = { path = "../wire" }
+
+[dev-dependencies]
+dataos-datacore = { path = "../datacore", features = ["sim"] }
+dataos-datad = { path = "../datad" }
+dataos-netcfg = { path = "../netcfg", features = ["fake"] }
+dataos-qmi = { path = "../qmi" }

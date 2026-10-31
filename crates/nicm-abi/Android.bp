@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//
+// Sketch, not built. The structs between libnicm.so and libnicm_dsi.so. Data
+// only, but linked into qcrilNrd like the rest, so the lint wall holds here too.
+// See crates/wire/Android.bp for what the three properties do and android/README.md
+// for the proof.
+rust_library {
+    name: "libdataos_nicm_abi",
+    defaults: ["diamaneos_datad_defaults"],
+    vendor: true,
+    crate_name: "dataos_nicm_abi",
+    crate_root: "src/lib.rs",
+    srcs: ["src/lib.rs", "clippy.toml"],
+    edition: "2021",
+    clippy_lints: "android",
+    lints: "vendor",
+    cargo_env_compat: true,
+    // a device build refuses the pair while STOCK_ABI_VERIFIED is false (nicm-abi/src/lib.rs)
+    cfgs: ["device_build"],
+}

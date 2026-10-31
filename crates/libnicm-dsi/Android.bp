@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//
+// Sketch, not built. Replaces the stock libnicm_dsi.so, the translation layer
+// between libdsi_netctrl.so and the interface manager. It imports
+// nicm_send_client_cmd from libnicm.so. Its ten exports refuse until the layouts
+// of the closed library are verified (`STOCK_ABI_VERIFIED`). The lint wall
+// holds here as in the shim crates.
+rust_ffi_shared {
+    name: "libnicm_dsi",
+    defaults: ["diamaneos_datad_defaults"],
+    vendor: true,
+    crate_name: "nicm_dsi",
+    crate_root: "src/lib.rs",
+    srcs: ["src/lib.rs", "clippy.toml"],
+    edition: "2021",
+    rustlibs: ["libdataos_nicm_abi"],
+    shared_libs: ["libnicm"],
+    stem: "libnicm_dsi",
+    // Everything is linked in, std included. The library is loaded into qcrilNrd and must not need a
+    // libstd.dylib.so or a libdataos_wire.dylib.so next to it (the default of rustlibs is the dylib).
+    prefer_rlib: true,
+    clippy_lints: "android",
+    lints: "vendor",
+    cargo_env_compat: true,
+    // a device build refuses the pair while STOCK_ABI_VERIFIED is false (nicm-abi/src/lib.rs)
+    cfgs: ["device_build"],
+}

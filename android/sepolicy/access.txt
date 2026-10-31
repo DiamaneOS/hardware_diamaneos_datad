@@ -1,0 +1,17 @@
+# What the policy must allow, asked of the policy of the last good run (the access check on the build host).
+# One access per line, as the body of a neverallow rule. The radio daemon makes its own socket, connects to the control
+# socket of the daemon by the path init made, and talks over the connection. The daemon accepts and talks.
+rild self:unix_stream_socket create
+rild self:unix_stream_socket { read write getopt }
+rild diamaneos_datad:unix_stream_socket connectto
+rild diamaneos_datad_socket:sock_file write
+rild socket_device:dir search
+diamaneos_datad self:unix_stream_socket { accept listen read write getopt }
+diamaneos_datad self:qipcrtr_socket { create bind getattr read write }
+diamaneos_datad self:netlink_route_socket { create bind setopt read write ioctl nlmsg }
+diamaneos_datad diamaneos_datad_state:dir { search write add_name remove_name }
+diamaneos_datad diamaneos_datad_state:file { create open read write getattr rename unlink }
+# The daemon's lines reach logd through liblog (log.rs): the platform gives every domain the socket and the send.
+diamaneos_datad self:unix_dgram_socket { create connect write }
+diamaneos_datad logdw_socket:sock_file write
+diamaneos_datad logd:unix_dgram_socket sendto

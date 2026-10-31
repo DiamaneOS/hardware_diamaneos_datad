@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//
+// Runs in the data daemon, so a panic ends datad and init starts it again. The three lint
+// properties switch the lint wall of lib.rs on in the platform build, see crates/wire/Android.bp.
+rust_library {
+    name: "libdataos_datacore",
+    defaults: ["diamaneos_datad_defaults"],
+    vendor: true,
+    crate_name: "dataos_datacore",
+    srcs: ["src/lib.rs"],
+    edition: "2021",
+    rustlibs: ["libdataos_qmi", "libdataos_netcfg"],
+    clippy_lints: "android",
+    lints: "vendor",
+    cargo_env_compat: true,
+}

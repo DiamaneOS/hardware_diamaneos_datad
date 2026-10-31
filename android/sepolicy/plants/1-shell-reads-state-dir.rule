@@ -1,0 +1,2 @@
+# A shell that reads the directory of the table of links.
+allow shell diamaneos_datad_state:dir { read open };

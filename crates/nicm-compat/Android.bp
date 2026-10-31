@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//
+// Sketch, not built. The client of the interface manager requests, behind the
+// replacements of libnicm.so and libnicm_dsi.so. It runs inside qcrilNrd, so the
+// lint wall must hold in the platform build, see crates/wire/Android.bp for what
+// the three properties do and android/README.md for the proof. dataos-wire is its
+// only dependency, a test keeps it so.
+rust_library {
+    name: "libdataos_nicm_compat",
+    defaults: ["diamaneos_datad_defaults"],
+    vendor: true,
+    crate_name: "dataos_nicm_compat",
+    crate_root: "src/lib.rs",
+    srcs: ["src/lib.rs", "clippy.toml"],
+    edition: "2021",
+    rustlibs: ["libdataos_wire"],
+    clippy_lints: "android",
+    lints: "vendor",
+    cargo_env_compat: true,
+}

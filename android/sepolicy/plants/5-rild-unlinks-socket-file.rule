@@ -1,0 +1,2 @@
+# The radio daemon removes the socket file that init made.
+allow rild diamaneos_datad_socket:sock_file unlink;

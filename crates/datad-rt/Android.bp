@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//
+// The data daemon: the sockets, the syscall filter and the process setup (the library) and the
+// binary that runs them. It replaces nicmd. The init rc is installed with the
+// binary through required: (the pattern of the IMS daemon), the vendor user comes from
+// android/config.fs through TARGET_FS_CONFIG_GEN and the device switch (android/datad-board.mk).
+// The three lint properties switch the lint wall of lib.rs on in the platform build, see
+// crates/wire/Android.bp.
+rust_library {
+    name: "libdataos_datad_rt",
+    defaults: ["diamaneos_datad_defaults"],
+    vendor: true,
+    crate_name: "dataos_datad_rt",
+    srcs: ["src/lib.rs"],
+    edition: "2021",
+    rustlibs: [
+        "libdataos_datad",
+        "libdataos_datacore",
+        "libdataos_netcfg",
+        "libdataos_qmi",
+        "libdataos_wire",
+        "liblibc",
+    ],
+    // log.rs writes to logd through liblog
+    shared_libs: ["liblog"],
+    clippy_lints: "android",
+    lints: "vendor",
+    cargo_env_compat: true,
+}
+
+rust_binary {
+    name: "datad",
+    defaults: ["diamaneos_datad_defaults"],
+    vendor: true,
+    crate_name: "datad",
+    srcs: ["src/main.rs"],
+    edition: "2021",
+    rustlibs: [
+        "libdataos_datad_rt",
+        "libdataos_datad",
+        "libdataos_datacore",
+        "libdataos_netcfg",
+        "libdataos_qmi",
+    ],
+    required: ["datad.rc"],
+    shared_libs: ["liblog"],
+    // One binary with its libraries in it, not seven dylibs in /vendor/lib64.
+    prefer_rlib: true,
+    clippy_lints: "android",
+    lints: "vendor",
+    cargo_env_compat: true,
+}

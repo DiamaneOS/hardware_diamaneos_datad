@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+#
+# Data daemon: replaces nicmd (and with it the TIPC connection to the radio daemon).
+# It owns the modem data plumbing nicmd owned: rmnet links, IPA data format, the
+# attach legs of the WDS clients, interface addresses. Installed with the binary (required: in
+# crates/datad-rt/Android.bp) only when the device sets DIAMANEOS_DATAD=true.
+#
+# - Own vendor user (config.fs, UID 2998) and no supplementary group. A new radio daemon is told from an old
+#   one that had the same number by the pidfd of the peer (SO_PEERPIDFD and pidfs, so a kernel 6.9 or later, which
+#   the daemon checks at start), which needs nothing of /proc. The radio daemon reaches the socket through its group, which init sets on the
+#   socket independently of the service's groups. The socket mode is 0660 and the server also checks
+#   SO_PEERCRED and SO_PEERSEC. libnicm.so (ours) connects to /dev/socket/datad. The stock one used
+#   /dev/socket/nicmd/nicm_connect and TIPC, so the directory /dev/socket/nicmd is gone.
+# - NET_ADMIN only. nicmd also had NET_RAW and BLOCK_SUSPEND, which this
+#   design does not need (the wakelock is not taken).
+# - No standard output or error (init gives the daemon none). Its own lines go to logd through liblog (tag
+#   datad, crates/datad-rt/src/log.rs), so they are in logcat on a user build, and carry no identifier.
+# - Not critical: a crash must never reboot the phone. init restarts it, the library in
+#   the radio daemon reconnects and tells the data module to start over (the restart
+#   protocol of the stock nicmd), so a crash is a short data outage.
+# - Not in this file: /data/vendor/nicmd and nicm_recovery (the stock recovery file). The
+#   daemon needs no state across a restart that survives a boot (it keeps a small marker file in a tmpfs
+#   directory, which a reboot clears).
+service vendor.datad /vendor/bin/datad
+    class main
+    user vendor_datad
+    group vendor_datad
+    capabilities NET_ADMIN
+    socket datad seqpacket 0660 vendor_datad radio
+    # no "critical", no "oneshot"
+
+on early-boot
+    # tmpfs, so a reboot clears the setup marker by itself. The marker also holds the boot ID.
+    mkdir /dev/datad 0700 vendor_datad vendor_datad
+
+on boot
+    # From nicmd.rc: the socket buffer ceilings the stock service raised.
+    # Check whether the QMAP data path needs them at all before keeping them.
+    write /proc/sys/net/core/rmem_max 16777216
+    write /proc/sys/net/core/wmem_max 8388608
+
+# From nicmd.rc, word for word: the performance modules, loaded on properties. Only the
+# closed libnicm_internal.so names these properties, so nicmd set them and
+# nothing in this tree does. Its log has the values it chose, "Rmnet Offload/Shs/Perf: %d,
+# %d, %d" and "Target: %s". Until those are read from a stock log the properties stay unset and
+# the modules stay unloaded: data works without them, only the throughput and the CPU use differ.
+# To set the defaults here, add to "on boot" a "setprop persist.vendor.data.shs_ko_load N"
+# line per property, and give init's domain the property rights in the policy.
+on property:persist.vendor.data.shs_ko_load=1
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -a -d /vendor/lib/modules rmnet_shs
+
+on property:persist.vendor.data.shs_ko_load=0
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -r -d /vendor/lib/modules rmnet_shs
+
+on property:persist.vendor.data.perf_ko_load=3
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -d /vendor/lib/modules rmnet_perf rmnet_perf_ingress_deag=N
+
+on property:persist.vendor.data.perf_ko_load=2
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -d /vendor/lib/modules rmnet_perf rmnet_perf_opt_mode="udp"
+
+on property:persist.vendor.data.perf_ko_load=1
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -a -d /vendor/lib/modules rmnet_perf
+
+on property:persist.vendor.data.perf_ko_load=0
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -r -d /vendor/lib/modules rmnet_perf
+
+on property:persist.vendor.data.offload_ko_load=1
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -a -d /vendor/lib/modules rmnet_offload
+
+on property:persist.vendor.data.offload_ko_load=0
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -r -d /vendor/lib/modules rmnet_offload

@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//
+// The Rust modules are next to their crates: crates/*/Android.bp. The five crates that run inside
+// qcrilNrd (wire, nicm-compat, nicm-abi and the two shared libraries libnicm and libnicm_dsi that replace
+// the stock ones) have the soname and the exports the closed libdsi_netctrl.so and libqcrilDataModule.so
+// need, and the daemon crates (qmi, netcfg, datacore, datad and datad-rt with the binary datad) have the same
+// three lint properties. This file has the init rc, which the binary installs through required:
+// (the pattern of the IMS daemon). The device pulls all of it in only with DIAMANEOS_DATAD=true
+// (datad-board.mk and datad-product.mk).
+//
+// Soong builds device Rust with -C panic=abort (build/soong/rust/config/global.go), so a panic in libnicm
+// or libnicm_dsi ends qcrilNrd. The crates linked into it forbid unwrap, expect, panic, indexing and
+// unchecked arithmetic, confine unsafe code to two files per library, and tests check that.
+//
+// Soong runs clippy only for modules whose lint set enables it, and the default set for paths under
+// hardware/ and vendor/ is "vendor", which turns clippy off (build/soong/rust/config/lints.go, lintSets and
+// the path table). So every module asks for clippy_lints "android", and lints "vendor" keeps the relaxed
+// rustc set (the android set adds -D missing-docs). The lint attributes in the crates then apply in the
+// platform build too. clippy-driver finds clippy.toml through CARGO_MANIFEST_DIR, which Soong sets only
+// with cargo_env_compat. android/README.md says how to prove the wall in a platform build.
+
+// The modules are off unless the device sets DIAMANEOS_DATAD=true (datad-soong.mk sets the Soong
+// config). Soong writes the install rule of every module that exists, and libnicm and libnicm_dsi
+// install to the paths of the stock files, so the modules of a build with the stock data stack must
+// not exist. Every Rust module of the crates takes this default.
+soong_config_module_type {
+    name: "diamaneos_datad_rust_defaults",
+    module_type: "rust_defaults",
+    config_namespace: "diamaneos_datad",
+    bool_variables: ["datad_enabled"],
+    properties: ["enabled"],
+}
+
+soong_config_bool_variable {
+    name: "datad_enabled",
+}
+
+diamaneos_datad_rust_defaults {
+    name: "diamaneos_datad_defaults",
+    soong_config_variables: {
+        datad_enabled: {
+            enabled: true,
+            conditions_default: {
+                enabled: false,
+            },
+        },
+    },
+}
+
+soong_config_module_type {
+    name: "diamaneos_datad_prebuilt_etc",
+    module_type: "prebuilt_etc",
+    config_namespace: "diamaneos_datad",
+    bool_variables: ["datad_enabled"],
+    properties: ["enabled"],
+}
+
+// The init rc of the daemon, installed with the binary (required: in crates/datad-rt/Android.bp).
+diamaneos_datad_prebuilt_etc {
+    name: "datad.rc",
+    src: "datad.rc",
+    sub_dir: "init",
+    vendor: true,
+    soong_config_variables: {
+        datad_enabled: {
+            enabled: true,
+            conditions_default: {
+                enabled: false,
+            },
+        },
+    },
+}

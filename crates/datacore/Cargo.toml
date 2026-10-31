@@ -1,0 +1,21 @@
+[package]
+name = "dataos-datacore"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dataos-qmi = { path = "../qmi" }
+dataos-netcfg = { path = "../netcfg" }
+
+[features]
+# The simulated modem, for tests of the crates above this one.
+sim = []
+
+[dev-dependencies]
+dataos-datacore = { path = ".", features = ["sim"] }
+dataos-netcfg = { path = "../netcfg", features = ["fake"] }

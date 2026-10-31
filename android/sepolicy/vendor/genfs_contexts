@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+# The per-link IPv6 switches of the daemon, by prefix. See datad.te.
+genfscon proc /sys/net/ipv6/conf/rmnet_data u:object_r:proc_net_rmnet_ipv6:s0

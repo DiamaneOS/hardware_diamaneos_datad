@@ -1,0 +1,2 @@
+# The daemon opens a TCP socket.
+allow diamaneos_datad self:tcp_socket create;

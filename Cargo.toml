@@ -1,0 +1,12 @@
+[workspace]
+members = ["crates/qmi", "crates/netcfg", "crates/datacore", "crates/wire", "crates/datad", "crates/datad-rt", "crates/nicm-compat", "crates/nicm-abi", "crates/libnicm", "crates/libnicm-dsi"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[profile.release]
+overflow-checks = true
+panic = "abort"

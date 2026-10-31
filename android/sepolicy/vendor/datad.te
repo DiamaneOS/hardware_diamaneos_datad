@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+#
+# The data daemon domain. It replaces nicmd (the stock domain vendor_nicmd stays defined in the
+# device policy and is simply unused when the stock daemon is left out of the image). Included only
+# when the device builds with DIAMANEOS_DATAD (datad-board.mk). Every rule below is exact: a
+# permission is here because the code does the call, and the code is named. Reduced from the nicmd
+# domain: no TIPC, no TCP, UDP or raw sockets, no node_bind, no netd or system_server Binder, no
+# NET_RAW, no BLOCK_SUSPEND, no XFRM, no QMI priority sockets, no sysfs.
+type diamaneos_datad, domain;
+type diamaneos_datad_exec, exec_type, vendor_file_type, file_type;
+type diamaneos_datad_socket, file_type;
+type diamaneos_datad_state, file_type;
+init_daemon_domain(diamaneos_datad)
+
+# The control socket /dev/socket/datad is made by init (datad.rc), labelled from file_contexts, and
+# handed over as a descriptor. The daemon makes it non-blocking, which SELinux checks as the use of
+# the descriptor only (selinux_file_fcntl), asks for the type and the listening state of it
+# (SO_TYPE, SO_ACCEPTCONN) and for the credentials, the label and the pidfd of every peer (SO_PEERCRED,
+# SO_PEERSEC, SO_PEERPIDFD), which is getopt. init does not call listen for a socket of the rc file
+# without +listen, so the daemon does (unix.rs, from_listener). A SOCK_SEQPACKET socket is a
+# unix_stream_socket to SELinux. The platform gives every domain these on its own unix stream sockets
+# (private/domain.te, create_stream_socket_perms), so the line says what the daemon does and grants nothing new.
+# The pidfd that SO_PEERPIDFD returns is read with fstat for its inode (the identity of the peer, which is the
+# process's own from Linux 6.9, and the daemon does not start on an older kernel). The pidfs inodes of the kernel
+# are private to the LSM (fs/pidfs.c, S_PRIVATE), so that needs no rule, and neither does closing it.
+allow diamaneos_datad self:unix_stream_socket { accept listen read write getopt };
+allow rild diamaneos_datad_socket:sock_file write;
+allow rild diamaneos_datad:unix_stream_socket connectto;
+
+# QMI to the modem over QRTR (WDS, WDA, DPM): one socket per client, bound to a port of the kernel's
+# choice, sending to the modem's servers and to the name service. QRTR has no per-service access
+# control (finding -24), so qrtr.te names this domain.
+# socket, getsockname (the node of the machine, and the port after the bind), bind, sendto, recvmsg.
+allow diamaneos_datad self:qipcrtr_socket { create bind getattr read write };
+
+# One NETLINK_ROUTE socket does everything: rmnet links (create, delete, set up and MTU), addresses,
+# and the interface ioctls (name to index, rmnet_ipa0 control, device features), which the kernel hands to the device
+# for a netlink socket too. Kernels from 6.13 (policycap netlink_xperm) check the message type: the
+# four of rtnl.rs (RTM_NEWLINK for create and set, RTM_DELLINK, RTM_NEWADDR, RTM_DELADDR) and no
+# dump, so no RTM_GETLINK and no RTM_GETADDR. The old per-class permissions nlmsg_read and
+# nlmsg_write are not granted, a 6.1 kernel would deny them, and 6.1 is archived. Stock nicmd also sends
+# RTM_GETROUTE, RTM_NEWRULE and RTM_DELRULE, and the daemon sends none. A test in
+# rtnl.rs holds this list to the types that file sends.
+# socket, bind, setsockopt (SO_RCVTIMEO), send and recv, the ioctls below, and the type of message.
+allow diamaneos_datad self:netlink_route_socket { create bind setopt read write ioctl nlmsg };
+allowxperm diamaneos_datad self:netlink_route_socket nlmsg { RTM_NEWLINK RTM_DELLINK RTM_NEWADDR RTM_DELADDR };
+# SIOCGIFINDEX, RMNET_IOCTL_EXTENDED (SIOCDEVPRIVATE + 13: the endpoint, the pipe pair and the mux channels),
+# RMNET_IOCTL_EXTENDED_V2 (SIOCDEVPRIVATE + 14: the data format of the pipes, which reports a pipe that is up) and
+# SIOCETHTOOL (the offload features of rmnet_ipa0 and of the rmnet links, which the driver and datarmnet leave off).
+allowxperm diamaneos_datad self:netlink_route_socket ioctl { SIOCGIFINDEX SIOCDEVPRIVATE_D SIOCDEVPRIVATE_E SIOCETHTOOL };
+# Looking up an interface name that does not exist makes the kernel try to load a module for it
+# (dev_load, request_module netdev-NAME, for a caller with CAP_NET_ADMIN). Links are deleted by
+# name over netlink, which has no such lookup. The parent device lookup and a call on a link that
+# vanished still can, as with stock nicmd, so the denial is silenced the same way.
+dontaudit diamaneos_datad kernel:system module_request;
+
+allow diamaneos_datad self:capability net_admin;
+neverallow diamaneos_datad self:capability { net_raw setuid setgid setpcap kill sys_module };
+
+# IPv6 per-interface switches under /proc/sys/net/ipv6/conf/rmnet_data*: accept_ra, autoconf and
+# disable_ipv6 (netcfg linux.rs set_ipv6). Stock nicmd had proc_net:file rw_file_perms, which covers
+# every /proc/sys/net knob (forwarding included). A genfscon prefix label (genfs_contexts) narrows
+# it to the daemon's own links. proc_net_type is what netd's rule for the /proc/sys/net files is
+# written against, so netd and the other readers keep their access to these.
+type proc_net_rmnet_ipv6, fs_type, proc_type, proc_net_type;
+allow diamaneos_datad proc_net_rmnet_ipv6:file { open read write getattr };
+allow diamaneos_datad proc_net_rmnet_ipv6:dir search;
+allow diamaneos_datad proc_net:dir search;
+
+# The setup marker and the table of the links handed out are files in a tmpfs directory that init
+# makes (datad.rc). They are opened by name, made (open with create, 0600) and written under a
+# temporary name, and the rename replaces the old one, which needs add_name and remove_name on the
+# directory and unlink of the file it replaces. Reading is open, fstat (the size, from the standard
+# library) and read. The boot ID comes from /proc/sys/kernel/random/boot_id, which every domain may
+# read (private/domain.te, proc_random).
+allow diamaneos_datad diamaneos_datad_state:dir { search write add_name remove_name };
+allow diamaneos_datad diamaneos_datad_state:file { create open read write getattr rename unlink };
+# A marker that says both pipes exist on a device whose pipes were never set up gives a daemon that
+# is ready and a data path that is not there, and a table with a wrong link gives a call to the
+# wrong process, so nothing but the daemon and the init that makes the directory may write it.
+# vendor_init runs the mkdir of the vendor rc file and sets the owner and mode, and may do nothing
+# else with it. init and dumpstate are named where the platform grants them access.
+allow vendor_init diamaneos_datad_state:dir { create setattr getattr };
+neverallow { domain -diamaneos_datad -init -vendor_init } diamaneos_datad_state:dir { write add_name remove_name setattr rename reparent rmdir };
+neverallow { domain -diamaneos_datad -init -vendor_init } diamaneos_datad_state:file { write create append rename setattr unlink link };
+# The table holds the access point names of the calls and the process that holds each, so it is not read by
+# anyone else either. dumpstate is named because the platform lets it read every file type it can see.
+neverallow { domain -diamaneos_datad -init -vendor_init -dumpstate } diamaneos_datad_state:dir { read open ioctl lock };
+neverallow { domain -diamaneos_datad -init -vendor_init -dumpstate } diamaneos_datad_state:file { read open map ioctl lock };
+
+# Only the radio daemon connects, and only init makes the socket. The daemon checks the peer's UID
+# and label as well.
+neverallow { domain -rild -init -diamaneos_datad } diamaneos_datad:unix_stream_socket connectto;
+neverallow { domain -init -rild } diamaneos_datad_socket:sock_file { write append };
+neverallow { domain -init -vendor_init } diamaneos_datad_socket:sock_file { create unlink rename setattr };
+neverallow diamaneos_datad self:{ tcp_socket udp_socket rawip_socket packet_socket tipc_socket } *;

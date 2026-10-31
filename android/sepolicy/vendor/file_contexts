@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+/vendor/bin/datad       u:object_r:diamaneos_datad_exec:s0
+/dev/socket/datad       u:object_r:diamaneos_datad_socket:s0
+/dev/datad(/.*)?        u:object_r:diamaneos_datad_state:s0

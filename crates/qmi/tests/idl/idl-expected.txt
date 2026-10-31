@@ -1,0 +1,121 @@
+# The layouts of the QMI messages that the data daemon builds or parses, as the IDL tables of the stock
+# libqmiservices.so give them (FP6.QREL.16.111.0). Only the TLVs the code touches are listed, and all of Start
+# Network, because the engine can carry any of its TLVs as an extra.
+#
+# A dump of the IDL tables of a newer copy of the library is compared with these layouts and must not
+# differ in any of them. `cargo test -p dataos-qmi -p dataos-datacore` reads the same file and fails when a
+# message the code builds or accepts does not fit it. Type texts: u8 to u64 and enum8/enum16 are the widths on the wire (the tables keep no signedness and no enum
+# members), str[<=N] is a top-level string of at most N bytes, and X[<=N]/P an array of at most N items with a
+# P byte count in front of it. req/opt is whether the table marks the TLV as mandatory.
+#
+# The route lookup (0xfff2) is in no service object: the stock code sends it as a raw message, built TLV by TLV
+# with the numbering and widths of Start Network. The line below fails when a library starts to define it.
+
+service wds 0x01
+absent request 0xfff2
+request 0x0003
+  tlv 0x12 opt u8
+response 0x0003
+  tlv 0x02 req struct{enum16,enum16}
+request 0x0020
+  tlv 0x10 opt u32
+  tlv 0x11 opt u32
+  tlv 0x12 opt u32
+  tlv 0x13 opt u32
+  tlv 0x14 opt str[<=150]
+  tlv 0x15 opt u32
+  tlv 0x16 opt u8
+  tlv 0x17 opt str[<=127]
+  tlv 0x18 opt str[<=127]
+  tlv 0x19 opt enum8
+  tlv 0x30 opt u8
+  tlv 0x31 opt u8
+  tlv 0x32 opt u8
+  tlv 0x33 opt u8
+  tlv 0x34 opt enum16
+  tlv 0x35 opt enum8
+  tlv 0x36 opt struct{u32,u8[16],enum8}
+  tlv 0x37 opt u8
+  tlv 0x38 opt u32
+  tlv 0x39 opt u8
+  tlv 0x3a opt u8
+  tlv 0x3b opt struct{u32,u32}
+  tlv 0x3c opt u8
+  tlv 0x3d opt u8
+  tlv 0x3e opt u64
+  tlv 0x3f opt struct{struct{u8,u8,struct{u8,u8[3],u8,u8,u8[3]},u8,u8[3]},str[<=150]/1,u8}
+  tlv 0x40 opt struct{u32,struct{u8[6]}}
+response 0x0020
+  tlv 0x02 req struct{enum16,enum16}
+  tlv 0x01 req u32
+  tlv 0x10 opt enum16
+  tlv 0x11 opt struct{enum16,u16}
+request 0x0021
+  tlv 0x01 req u32
+response 0x0021
+  tlv 0x02 req struct{enum16,enum16}
+indication 0x0022
+  tlv 0x01 req struct{enum8,u8}
+  tlv 0x10 opt enum16
+  tlv 0x11 opt struct{enum16,u16}
+  tlv 0x12 opt enum8
+  tlv 0x14 opt u8
+request 0x002d
+  tlv 0x10 opt u32
+response 0x002d
+  tlv 0x02 req struct{enum16,enum16}
+  tlv 0x15 opt u32
+  tlv 0x16 opt u32
+  tlv 0x1e opt u32
+  tlv 0x20 opt u32
+  tlv 0x21 opt u32
+  tlv 0x23 opt struct{struct{u32}[<=20]/1}
+  tlv 0x24 opt struct{struct{str[<=256]/2}[<=15]/1}
+  tlv 0x25 opt struct{u8[16],u8}
+  tlv 0x26 opt struct{u8[16],u8}
+  tlv 0x27 opt u8[16]
+  tlv 0x28 opt u8[16]
+  tlv 0x29 opt u32
+  tlv 0x2a opt struct{struct{str[<=256]/2}[<=15]/1}
+  tlv 0x2b opt enum8
+request 0x004d
+  tlv 0x01 req enum8
+response 0x004d
+  tlv 0x02 req struct{enum16,enum16}
+indication 0x008c
+  tlv 0x10 opt u32
+  tlv 0x11 opt u32
+request 0x00a2
+  tlv 0x10 opt struct{u32,u32}
+  tlv 0x11 opt u8
+  tlv 0x13 opt u32
+response 0x00a2
+  tlv 0x02 req struct{enum16,enum16}
+request 0x00af
+  tlv 0x01 req u32
+response 0x00af
+  tlv 0x02 req struct{enum16,enum16}
+
+service wda 0x1a
+request 0x0020
+  tlv 0x11 opt u32
+  tlv 0x12 opt u32
+  tlv 0x13 opt u32
+  tlv 0x15 opt u32
+  tlv 0x16 opt u32
+  tlv 0x17 opt struct{u32,u32}
+  tlv 0x1b opt u32
+  tlv 0x1c opt u32
+  tlv 0x1d opt struct{u8,u8}
+response 0x0020
+  tlv 0x02 req struct{enum16,enum16}
+  tlv 0x11 opt u32
+  tlv 0x12 opt u32
+  tlv 0x13 opt u32
+  tlv 0x16 opt u32
+
+service dpm 0x2f
+request 0x0020
+  tlv 0x11 opt struct{struct{u32,u32},struct{u32,u32}}[<=32]/1
+response 0x0020
+  tlv 0x02 req struct{enum16,enum16}

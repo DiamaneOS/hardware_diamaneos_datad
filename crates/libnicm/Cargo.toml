@@ -1,0 +1,21 @@
+[package]
+name = "dataos-libnicm"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# An rlib for the host tests. Soong builds the shared library libnicm.so from the same source.
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dataos-wire = { path = "../wire" }
+dataos-nicm-compat = { path = "../nicm-compat" }
+dataos-nicm-abi = { path = "../nicm-abi" }
+libc = "=0.2.174"
+
+[dev-dependencies]
+dataos-datacore = { path = "../datacore", features = ["sim"] }
+dataos-datad = { path = "../datad" }
+dataos-netcfg = { path = "../netcfg", features = ["fake"] }
