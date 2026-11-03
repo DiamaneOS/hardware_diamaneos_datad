@@ -17,9 +17,12 @@
     )
 )]
 pub mod ethtool;
+pub mod genl;
 pub mod ipa;
 pub mod ops;
 pub mod rtnl;
+pub mod rtnl_tunnel;
+pub mod xfrm;
 
 #[cfg(any(test, feature = "fake"))]
 pub mod fake;

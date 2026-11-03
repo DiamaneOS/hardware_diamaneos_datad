@@ -52,13 +52,18 @@ fn align4(n: usize) -> usize {
     (n + 3) & !3
 }
 
-struct Msg {
+pub(crate) struct Msg {
     buf: Vec<u8>,
 }
 
 impl Msg {
-    fn new(ty: u16, flags: u16, seq: u32) -> Self {
-        let mut buf = Vec::with_capacity(128);
+    pub(crate) fn new(ty: u16, flags: u16, seq: u32) -> Self {
+        Self::sized(ty, flags, seq, 128)
+    }
+
+    /// A message with room for this many bytes from the start.
+    pub(crate) fn sized(ty: u16, flags: u16, seq: u32, room: usize) -> Self {
+        let mut buf = Vec::with_capacity(room);
         buf.extend_from_slice(&0u32.to_ne_bytes()); // length, patched in finish
         buf.extend_from_slice(&ty.to_ne_bytes());
         buf.extend_from_slice(&flags.to_ne_bytes());
@@ -67,19 +72,19 @@ impl Msg {
         Msg { buf }
     }
 
-    fn raw(&mut self, b: &[u8]) {
+    pub(crate) fn raw(&mut self, b: &[u8]) {
         self.buf.extend_from_slice(b);
     }
 
     /// Open a nested attribute. Returns the offset to pass to `end`.
-    fn begin(&mut self, ty: u16) -> usize {
+    pub(crate) fn begin(&mut self, ty: u16) -> usize {
         let at = self.buf.len();
         self.buf.extend_from_slice(&0u16.to_ne_bytes());
         self.buf.extend_from_slice(&ty.to_ne_bytes());
         at
     }
 
-    fn end(&mut self, at: usize) {
+    pub(crate) fn end(&mut self, at: usize) {
         let len = u16::try_from(self.buf.len().saturating_sub(at)).unwrap_or(u16::MAX);
         if let Some(dst) = self.buf.get_mut(at..at.saturating_add(2)) {
             dst.copy_from_slice(&len.to_ne_bytes());
@@ -89,13 +94,13 @@ impl Msg {
         }
     }
 
-    fn attr(&mut self, ty: u16, payload: &[u8]) {
+    pub(crate) fn attr(&mut self, ty: u16, payload: &[u8]) {
         let at = self.begin(ty);
         self.buf.extend_from_slice(payload);
         self.end(at);
     }
 
-    fn finish(mut self) -> Vec<u8> {
+    pub(crate) fn finish(mut self) -> Vec<u8> {
         let len = u32::try_from(self.buf.len()).unwrap_or(u32::MAX);
         if let Some(dst) = self.buf.get_mut(0..4) {
             dst.copy_from_slice(&len.to_ne_bytes());
@@ -113,7 +118,7 @@ fn ifinfomsg(index: i32, flags: u32, change: u32) -> [u8; 16] {
     b
 }
 
-fn name_attr(name: &str) -> Result<Vec<u8>, BuildError> {
+pub(crate) fn name_attr(name: &str) -> Result<Vec<u8>, BuildError> {
     let b = name.as_bytes();
     if b.is_empty()
         || b.len() > IFNAME_MAX
