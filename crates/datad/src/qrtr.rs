@@ -101,10 +101,10 @@ pub struct ServiceStats {
     pub stale_removals: u32,
 }
 
-/// The three servers one modem session uses.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The servers one modem session uses, one per wanted service.
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Chosen {
-    servers: [(Entry, Peer); 3],
+    servers: Vec<(Entry, Peer)>,
 }
 
 /// The modem's data services as the name service announces them. The modem is up when one remote
@@ -113,6 +113,7 @@ struct Chosen {
 /// the modem is down and a new choice follows from what is left.
 pub struct Services {
     local_node: u32,
+    wanted: &'static [u8],
     entries: BTreeMap<Peer, Entry>,
     chosen: Option<Chosen>,
     stats: ServiceStats,
@@ -120,8 +121,14 @@ pub struct Services {
 
 impl Services {
     pub fn new(local_node: u32) -> Self {
+        Self::wanting(local_node, &WANTED)
+    }
+
+    /// The table for another list of services. The modem is up when one node has all of them.
+    pub fn wanting(local_node: u32, wanted: &'static [u8]) -> Self {
         Services {
             local_node,
+            wanted,
             entries: BTreeMap::new(),
             chosen: None,
             stats: ServiceStats::default(),
@@ -138,7 +145,8 @@ impl Services {
 
     /// Where the chosen server of this service is. None while the modem is down.
     pub fn target(&self, service: u8) -> Option<Peer> {
-        self.chosen?
+        self.chosen
+            .as_ref()?
             .servers
             .iter()
             .find(|(e, _)| e.service == service)
@@ -164,7 +172,10 @@ impl Services {
 
     fn add(&mut self, service: u32, instance: u32, node: u32, port: u32) {
         // service 0 is the end of a lookup's list, port 0 is no server
-        let Some(service) = u8::try_from(service).ok().filter(|s| WANTED.contains(s)) else {
+        let Some(service) = u8::try_from(service)
+            .ok()
+            .filter(|s| self.wanted.contains(s))
+        else {
             return;
         };
         if port == 0 {
@@ -222,7 +233,8 @@ impl Services {
         let nodes: BTreeSet<u32> = self.entries.keys().map(|p| p.node).collect();
         for node in nodes {
             let mut servers = Vec::new();
-            for service in WANTED {
+            for service in self.wanted {
+                let service = *service;
                 let best = self
                     .entries
                     .iter()
@@ -232,10 +244,8 @@ impl Services {
                     servers.push((*e, *p));
                 }
             }
-            if let [a, b, c] = servers.as_slice() {
-                return Some(Chosen {
-                    servers: [*a, *b, *c],
-                });
+            if servers.len() == self.wanted.len() {
+                return Some(Chosen { servers });
             }
         }
         None
@@ -545,6 +555,27 @@ mod tests {
         assert_eq!(s.clear(), vec![ServiceEvent::ModemDown]);
         assert!(!s.is_up());
         assert!(s.clear().is_empty());
+    }
+
+    #[test]
+    fn another_list_of_services_decides_when_the_modem_is_up() {
+        const TWO: [u8; 2] = [wds::SERVICE, 0x30];
+        let mut s = Services::wanting(LOCAL, &TWO);
+        assert!(s.apply(new_server(wds::SERVICE, 1, MODEM, 100)).is_empty());
+        // a service of the default list is no use here
+        assert!(s.apply(new_server(wda::SERVICE, 1, MODEM, 101)).is_empty());
+        assert_eq!(
+            s.apply(new_server(0x30, 1, MODEM, 102)),
+            vec![ServiceEvent::ModemUp]
+        );
+        assert_eq!(
+            s.target(0x30),
+            Some(Peer {
+                node: MODEM,
+                port: 102
+            })
+        );
+        assert_eq!(s.target(wda::SERVICE), None);
     }
 
     #[test]

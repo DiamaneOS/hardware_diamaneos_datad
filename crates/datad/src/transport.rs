@@ -116,15 +116,22 @@ pub struct QmiLink<Q: Qrtr> {
     reset_pending: bool,
     reopen_ms: u64,
     opened_at: u64,
+    wanted: &'static [u8],
+    max_clients: usize,
     stats: LinkStats,
 }
 
 impl<Q: Qrtr> QmiLink<Q> {
     pub fn new(io: Q) -> Self {
+        Self::for_services(io, &WANTED, MAX_CLIENTS)
+    }
+
+    /// A transport for another daemon: the services that make the modem up and how many clients it may open.
+    pub fn for_services(io: Q, wanted: &'static [u8], max_clients: usize) -> Self {
         QmiLink {
             io,
             ctrl: Ctrl::Closed { retry_at: 0 },
-            services: Services::new(0),
+            services: Services::wanting(0, wanted),
             clients: BTreeMap::new(),
             next_client: 1,
             out: Outbox::new(OUT_ITEMS, OUT_BYTES, OUT_WAIT_MS),
@@ -132,6 +139,8 @@ impl<Q: Qrtr> QmiLink<Q> {
             reset_pending: false,
             reopen_ms: REOPEN_FIRST_MS,
             opened_at: 0,
+            wanted,
+            max_clients,
             stats: LinkStats::default(),
         }
     }
@@ -294,7 +303,7 @@ impl<Q: Qrtr> QmiLink<Q> {
     fn open_control(&mut self) {
         match self.try_open_control() {
             Some((sock, node, name_service)) => {
-                self.services = Services::new(node);
+                self.services = Services::wanting(node, self.wanted);
                 self.ctrl = Ctrl::Open { sock, name_service };
                 self.opened_at = self.now;
             }
@@ -313,7 +322,7 @@ impl<Q: Qrtr> QmiLink<Q> {
             port: CTRL_PORT,
         });
         let sent = name_service.is_some_and(|ns| {
-            WANTED.iter().all(|s| {
+            self.wanted.iter().all(|s| {
                 self.io
                     .send(sock, ns, &Control::lookup(*s).encode())
                     .is_ok()
@@ -379,7 +388,7 @@ impl<Q: Qrtr> QmiLink<Q> {
 impl<Q: Qrtr> Qmi for QmiLink<Q> {
     fn open_client(&mut self, service: u8) -> Result<ClientId, QmiError> {
         let target = self.services.target(service).ok_or(QmiError::Unavailable)?;
-        if self.clients.len() >= MAX_CLIENTS {
+        if self.clients.len() >= self.max_clients {
             return Err(QmiError::Unavailable);
         }
         let sock = match self.io.open() {

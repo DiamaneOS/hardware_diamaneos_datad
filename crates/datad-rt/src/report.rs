@@ -23,6 +23,7 @@ const KEEP: usize = 48;
 
 pub struct Reporter {
     dir: PathBuf,
+    name: &'static str,
     clock: MonotonicClock,
     lines: VecDeque<String>,
     /// Lines that were left out of the file because it could not be written, for the next line to say.
@@ -31,8 +32,14 @@ pub struct Reporter {
 
 impl Reporter {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self::named(dir, "datad")
+    }
+
+    /// The reporter of another daemon: the first line of the file has its name.
+    pub fn named(dir: impl Into<PathBuf>, name: &'static str) -> Self {
         Reporter {
             dir: dir.into(),
+            name,
             clock: MonotonicClock::new(),
             lines: VecDeque::new(),
             write_failures: 0,
@@ -69,7 +76,7 @@ impl Reporter {
     }
 
     fn write(&self) -> std::io::Result<()> {
-        let mut text = String::from("datad status, newest last\n");
+        let mut text = format!("{} status, newest last\n", self.name);
         for l in &self.lines {
             text.push_str(l);
             text.push('\n');

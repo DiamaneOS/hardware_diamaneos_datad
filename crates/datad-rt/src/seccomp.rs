@@ -228,9 +228,14 @@ fn skip(n: usize) -> u8 {
     u8::try_from(n).unwrap_or(u8::MAX)
 }
 
-/// The program. A call of another architecture ends the process. A call on the list runs
-/// (with a condition on one argument for some). Anything else gets the action.
+/// The program of this daemon.
 pub fn filter(action: Action) -> Vec<Insn> {
+    filter_of(action, &ALLOWED, &CONDITIONAL)
+}
+
+/// The program for a table of calls. A call of another architecture ends the process. A call on the list
+/// runs (with a condition on one argument for some). Anything else gets the action.
+pub fn filter_of(action: Action, allowed: &[u32], conditional: &[(u32, u32, &[u32])]) -> Vec<Insn> {
     let mut f = vec![
         insn(LD, 0, 0, OFFSET_ARCH),
         insn(JEQ, 1, 0, AUDIT_ARCH_AARCH64),
@@ -239,7 +244,7 @@ pub fn filter(action: Action) -> Vec<Insn> {
     ];
     // a block is a test of the number and, when it matches, the answer. Each block ends in a
     // return, so a match never falls into the next test, and a miss skips the whole body
-    for (call, arg, values) in CONDITIONAL {
+    for &(call, arg, values) in conditional {
         let n = values.len();
         // load, one test per value, the refusal, the allow
         let body = 1 + n + 1 + 1;
@@ -261,7 +266,7 @@ pub fn filter(action: Action) -> Vec<Insn> {
         ));
         f.push(insn(RET, 0, 0, RET_ALLOW));
     }
-    for call in ALLOWED {
+    for &call in allowed {
         f.push(insn(JEQ, 0, 1, call));
         f.push(insn(RET, 0, 0, RET_ALLOW));
     }
@@ -320,7 +325,15 @@ pub fn run(program: &[Insn], arch: u32, number: u32, args: [u64; 6]) -> Option<u
     target_arch = "aarch64"
 ))]
 pub fn install(action: Action) -> io::Result<()> {
-    let program = filter(action);
+    install_program(&filter(action))
+}
+
+/// Install a program: no new privileges, then the filter. Only for aarch64 Linux.
+#[cfg(all(
+    any(target_os = "linux", target_os = "android"),
+    target_arch = "aarch64"
+))]
+pub fn install_program(program: &[Insn]) -> io::Result<()> {
     let mut raw: Vec<libc::sock_filter> = program
         .iter()
         .map(|i| libc::sock_filter {
@@ -357,6 +370,14 @@ pub fn install(action: Action) -> io::Result<()> {
     target_arch = "aarch64"
 )))]
 pub fn install(_action: Action) -> io::Result<()> {
+    install_program(&[])
+}
+
+#[cfg(not(all(
+    any(target_os = "linux", target_os = "android"),
+    target_arch = "aarch64"
+)))]
+pub fn install_program(_program: &[Insn]) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "the filter is for arm64 Linux",

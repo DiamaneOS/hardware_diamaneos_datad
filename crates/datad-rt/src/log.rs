@@ -55,9 +55,19 @@ extern "C" {
     ) -> libc::c_int;
 }
 
-/// The tag of every line, as a C string.
-#[cfg(target_os = "android")]
-const TAG: &[u8] = b"datad\0";
+/// The tag of every line, as a C string. Another daemon of this repository sets its own at the start of `main`.
+static TAG: std::sync::OnceLock<&'static [u8]> = std::sync::OnceLock::new();
+
+/// Set the tag. It ends in a NUL. The first call counts and a bad value is left out.
+pub fn set_tag(tag: &'static [u8]) {
+    if tag.last() == Some(&0) && tag.iter().filter(|b| **b == 0).count() == 1 {
+        let _ = TAG.set(tag);
+    }
+}
+
+fn tag() -> &'static [u8] {
+    TAG.get().copied().unwrap_or(b"datad\0")
+}
 
 /// `struct __android_log_message` of `android/log.h` (API 30).
 #[cfg(target_os = "android")]
@@ -90,7 +100,7 @@ pub fn open(msg: &str) {
             // LOG_ID_MAIN
             buffer_id: 0,
             priority: Level::Info.priority(),
-            tag: TAG.as_ptr().cast(),
+            tag: tag().as_ptr().cast(),
             file: std::ptr::null(),
             line: 0,
             message: line.as_ptr().cast(),
@@ -100,7 +110,13 @@ pub fn open(msg: &str) {
         unsafe { __android_log_write_log_message(&mut m) };
     }
     #[cfg(not(target_os = "android"))]
-    eprintln!("datad: {msg}");
+    eprintln!("{}: {msg}", host_tag());
+}
+
+/// The tag as text, for a run on a host.
+#[cfg(not(target_os = "android"))]
+fn host_tag() -> String {
+    String::from_utf8_lossy(tag().strip_suffix(&[0]).unwrap_or(tag())).into_owned()
 }
 
 /// Write one line.
@@ -111,12 +127,16 @@ pub fn write(level: Level, msg: &str) {
         // SAFETY: the tag and the line are NUL-terminated and live until the call returns, and liblog only
         // reads them. The result is not needed: a line that could not be written is lost.
         let _ = unsafe {
-            __android_log_write(level.priority(), TAG.as_ptr().cast(), line.as_ptr().cast())
+            __android_log_write(
+                level.priority(),
+                tag().as_ptr().cast(),
+                line.as_ptr().cast(),
+            )
         };
     }
     #[cfg(not(target_os = "android"))]
     {
-        eprintln!("datad: {msg}");
+        eprintln!("{}: {msg}", host_tag());
         let _ = level;
     }
 }
@@ -147,6 +167,14 @@ mod tests {
         assert_eq!(c.len(), 1001);
         assert_eq!(c.last(), Some(&0));
         assert!(c[..1000].iter().all(|b| *b == b'x'));
+    }
+
+    #[test]
+    fn the_default_tag_is_the_daemon_and_a_tag_ends_in_one_nul() {
+        // no test sets a good tag, so the default stands in this process
+        set_tag(b"no nul");
+        set_tag(b"two\0nuls\0");
+        assert_eq!(tag(), b"datad\0");
     }
 
     #[test]

@@ -90,13 +90,20 @@ mod linux {
     pub struct QrtrSockets {
         socks: BTreeMap<SockId, (OwnedFd, Peer)>,
         next: SockId,
+        max_datagram: usize,
     }
 
     impl QrtrSockets {
         pub fn new() -> Self {
+            Self::with_max_datagram(MAX_DATAGRAM)
+        }
+
+        /// Sockets that read datagrams of up to this many bytes. A longer one is dropped.
+        pub fn with_max_datagram(max_datagram: usize) -> Self {
             QrtrSockets {
                 socks: BTreeMap::new(),
                 next: 1,
+                max_datagram,
             }
         }
     }
@@ -209,7 +216,7 @@ mod linux {
             let Some((fd, _)) = self.socks.get(&sock) else {
                 return Err(Fault::Other);
             };
-            let mut bytes = vec![0u8; MAX_DATAGRAM];
+            let mut bytes = vec![0u8; self.max_datagram];
             let mut from = Address::empty();
             let got =
                 recv_packet(fd.as_raw_fd(), &mut bytes, &mut from).map_err(|e| classify(&e))?;
