@@ -22,17 +22,21 @@ exist, the policy is not added and the product does not change.
 - `sepolicy/vendor/`: `datad.te` (domain, netlink rules for kernels 6.13 and later, interface ioctls on the netlink
   socket, peer rules, narrow IPv6 sysctl label, neverallows), `file_contexts`, `genfs_contexts`. Every permission set is exact, with
   the call it is for. It is compiled on a build host the way the build does (m4, checkpolicy, then the
-  versioned vendor policy and secilc with the neverallows). Each of the seven violations in `sepolicy/plants` must be refused by
-  a neverallow of `datad.te`, and the accesses in `sepolicy/access.txt` (the radio daemon makes its socket and connects to
+  versioned vendor policy and secilc with the neverallows). Each of the violations in `sepolicy/plants` must be refused by
+  a neverallow of `datad.te` or `wlantunnel.te`, and the accesses in `sepolicy/access.txt` (the radio daemon makes its socket and connects to
   ours, the daemon does what its code does) must be allowed by the compiled policy while a shell connecting is not. The
   recovery policy takes the vendor policy as well, so `m sepolicy.recovery` builds with it.
-- `config.fs`: the vendor UID, 2998. 2995 is `AID_VENDOR_POWERSTATS`. The value must be in the OEM range (2900 to 2999),
+- `wlantunneld.rc`: init service of the Wi-Fi tunnel daemon, with its own user and no supplementary group, and its tmpfs
+  directory `/dev/wlantunnel`. `sepolicy/vendor/wlantunnel.te` is its domain, written the same way as `datad.te`, and the
+  device `qrtr.te` names `diamaneos_wlantunnel` under the same `ifdef` as `diamaneos_datad`.
+- `config.fs`: the vendor UIDs, 2998 for the data daemon and 2989 for the Wi-Fi tunnel daemon. 2995 is `AID_VENDOR_POWERSTATS`. The value must be in the OEM range (2900 to 2999),
   not shared with another section of any `config.fs` of the product, and outside the stock range 2901 to 2917.
 - `vendor-selection.md`: the stock files that leave the vendor image, and how the project tools take them out.
 
 Rust modules: `libdataos_wire`, `libdataos_nicm_compat` and `libdataos_nicm_abi` and the two shared libraries `libnicm` and
 `libnicm_dsi` run inside `qcrilNrd` and have a `clippy.toml` next to their `Android.bp`. `libdataos_qmi`, `libdataos_netcfg`,
-`libdataos_datacore`, `libdataos_datad`, `libdataos_datad_rt` and the binary `datad` run in the daemon. Every module has
+`libdataos_datacore`, `libdataos_datad`, `libdataos_datad_rt` and the binary `datad` run in the daemon, and
+`libdataos_wlan_tunnel` and the binary `wlantunneld` in the Wi-Fi tunnel daemon. Every module has
 `clippy_lints: "android"`, `lints: "vendor"` and `cargo_env_compat: true`, and tests in `crates/nicm-compat/tests/no_panic.rs`
 fail if one is missing, if the Soong dependencies differ from the Cargo ones, or if a module lacks the switch default. The
 Rust code treats the Android target as Linux (`target_os = "android"` in the cfg lists).
@@ -66,6 +70,10 @@ That list is from the code and the standard library, not from a run. The filter 
 logs what it would refuse, the refusals of an argument of `socket`, `ioctl` and `fcntl` included) until a run on the phone (bring-up, a call, a modem restart, a marker write) shows nothing
 missing. Then `main.rs` sets `Action::Errno`.
 
+The Wi-Fi tunnel daemon has a filter of its own on the same builder (`crates/wlantunneld/src/filter.rs`): the list of the data
+daemon without `accept4` and with `connect`, `socket` for QRTR and the two IP families only, and `ioctl` for `SIOCGIFINDEX`,
+`SIOCGIFNAME` and the extended request of the rmnet device. It is in log mode too, until a run on the phone has shown nothing missing.
+
 ## Looking at a run
 
 The daemon and the two libraries say what they do at the information level, and none of the lines has an
@@ -77,6 +85,8 @@ identifier of a phone, a SIM, a network or a peer.
   for the first eight times and then for each power of two, with its count.
 - `/dev/datad/status` (as root, `cat`) has the last 48 lines of the daemon with the time of the kernel log in front, for
   the first minutes of a run when the log buffer has rolled over. The directory is tmpfs, so a reboot clears it.
+- `logcat -s wlantunneld` and `/dev/wlantunnel/status` (as root) have the same for the Wi-Fi tunnel daemon: the modem coming
+  and going, each link and family becoming ready, each message of the modem and each step of a tunnel with its error number.
 - The data module fails every data call with its cause `OEM_DCFAILCAUSE_4` (0x1004) until its init has finished, and
   its init waits for the readiness question to be answered with a yes. A daemon that is not ready says so in both places
   above, and the bring-up line before it names the step that did not finish.

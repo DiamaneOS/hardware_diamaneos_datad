@@ -56,6 +56,22 @@ soong_config_module_type {
     properties: ["enabled"],
 }
 
+// The init rc of the Wi-Fi tunnel daemon, installed with the binary (required: in crates/wlantunneld/Android.bp).
+diamaneos_datad_prebuilt_etc {
+    name: "wlantunneld.rc",
+    src: "wlantunneld.rc",
+    sub_dir: "init",
+    vendor: true,
+    soong_config_variables: {
+        datad_enabled: {
+            enabled: true,
+            conditions_default: {
+                enabled: false,
+            },
+        },
+    },
+}
+
 // The init rc of the daemon, installed with the binary (required: in crates/datad-rt/Android.bp).
 diamaneos_datad_prebuilt_etc {
     name: "datad.rc",

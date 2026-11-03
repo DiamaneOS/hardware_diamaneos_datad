@@ -986,12 +986,13 @@ fn a_soong_module_without_the_wall_properties_is_found() {
 }
 
 /// (crate directory, crate_name) of the library each crate of the daemon has.
-const DAEMON_MODULES: [(&str, &str); 5] = [
+const DAEMON_MODULES: [(&str, &str); 6] = [
     ("qmi", "dataos_qmi"),
     ("netcfg", "dataos_netcfg"),
     ("datacore", "dataos_datacore"),
     ("datad", "dataos_datad"),
     ("datad-rt", "dataos_datad_rt"),
+    ("wlan-tunnel", "dataos_wlan_tunnel"),
 ];
 
 /// The dependencies a Cargo.toml names outside the dev-dependencies, as Soong module names:
@@ -1066,6 +1067,38 @@ fn the_soong_modules_of_the_daemon_match_the_crates() {
         // the Soong dependencies are the Cargo ones, so the two builds link the same crates
         assert_eq!(rustlibs_of(body), cargo_deps_as_soong(k), "{k}: rustlibs");
     }
+}
+
+#[test]
+fn the_tunnel_daemon_is_built_from_main_and_brings_its_rc() {
+    let bp = fs::read_to_string(crates_dir().join("wlantunneld/Android.bp")).unwrap();
+    assert!(missing_soong_properties(&bp).is_empty());
+    assert_eq!(modules_without_the_switch(&bp), Vec::<String>::new());
+    let modules = bp_modules(&bp);
+    let (_, bin) = modules
+        .iter()
+        .find(|(kind, b)| kind == "rust_binary" && b.lines().any(|l| l == "name: \"wlantunneld\","))
+        .expect("no rust_binary wlantunneld");
+    for want in [
+        "srcs: [\"src/main.rs\"],",
+        "vendor: true,",
+        "required: [\"wlantunneld.rc\"],",
+        "prefer_rlib: true,",
+    ] {
+        assert!(bin.lines().any(|l| l == want), "no {want}");
+    }
+    assert_eq!(rustlibs_of(bin), cargo_deps_as_soong("wlantunneld"));
+    let rc = fs::read_to_string(crates_dir().parent().unwrap().join("android/Android.bp")).unwrap();
+    let rc_modules = bp_modules(&rc);
+    let (_, etc) = rc_modules
+        .iter()
+        .find(|(kind, b)| {
+            kind == "diamaneos_datad_prebuilt_etc"
+                && b.lines().any(|l| l == "name: \"wlantunneld.rc\",")
+        })
+        .expect("no switchable prebuilt_etc wlantunneld.rc");
+    let flat = etc.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("datad_enabled: { enabled: true, conditions_default: { enabled: false,"));
 }
 
 #[test]

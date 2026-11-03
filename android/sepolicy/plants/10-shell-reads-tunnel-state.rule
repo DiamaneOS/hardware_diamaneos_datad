@@ -1,0 +1,2 @@
+# A shell that reads the state file of the Wi-Fi tunnel daemon.
+allow shell diamaneos_wlantunnel_state:file { read open };

@@ -1,0 +1,2 @@
+# The daemon opens an XFRM socket.
+allow diamaneos_datad self:netlink_xfrm_socket create;

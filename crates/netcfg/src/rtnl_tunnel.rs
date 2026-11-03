@@ -186,6 +186,56 @@ mod tests {
         }
     }
 
+    /// The message types the policy allows for the tunnel daemon are what the code sends, no more and no fewer.
+    #[test]
+    fn the_policy_allows_the_message_types_that_are_sent_and_no_other() {
+        let te = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../android/sepolicy/vendor/wlantunnel.te"
+        ))
+        .unwrap();
+        let allowed = |rule: &str| -> Vec<String> {
+            let line = te.lines().find(|l| l.starts_with(rule)).unwrap();
+            let inside = line.split('{').nth(1).unwrap().split('}').next().unwrap();
+            let mut v: Vec<String> = inside.split_whitespace().map(str::to_owned).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(
+            allowed("allowxperm diamaneos_wlantunnel self:netlink_route_socket nlmsg {"),
+            ["RTM_DELRULE", "RTM_GETADDR", "RTM_NEWLINK", "RTM_NEWRULE"]
+        );
+        assert_eq!(
+            allowed("allowxperm diamaneos_wlantunnel self:netlink_xfrm_socket nlmsg {"),
+            [
+                "XFRM_MSG_DELPOLICY",
+                "XFRM_MSG_DELSA",
+                "XFRM_MSG_NEWPOLICY",
+                "XFRM_MSG_NEWSA"
+            ]
+        );
+        // the numbers of the file that builds them, and only RTM_NEWLINK comes from `rtnl.rs`
+        assert_eq!(
+            (
+                RTM_GETADDR,
+                RTM_NEWRULE,
+                RTM_DELRULE,
+                crate::rtnl::RTM_NEWLINK
+            ),
+            (22, 32, 33, 16)
+        );
+        use crate::xfrm::*;
+        assert_eq!(
+            (
+                XFRM_MSG_NEWSA,
+                XFRM_MSG_DELSA,
+                XFRM_MSG_NEWPOLICY,
+                XFRM_MSG_DELPOLICY
+            ),
+            (0x10, 0x11, 0x13, 0x14)
+        );
+    }
+
     #[test]
     fn a_rule_has_the_header_and_attributes_of_a_tunnel() {
         let m = new_rule(4, &rule()).unwrap();

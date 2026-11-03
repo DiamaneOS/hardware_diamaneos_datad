@@ -1,0 +1,2 @@
+# The Wi-Fi tunnel daemon gets raw network access.
+allow diamaneos_wlantunnel self:capability net_raw;

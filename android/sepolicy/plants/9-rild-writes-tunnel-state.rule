@@ -1,0 +1,2 @@
+# The radio daemon writes the state file of the Wi-Fi tunnel daemon.
+allow rild diamaneos_wlantunnel_state:file write;

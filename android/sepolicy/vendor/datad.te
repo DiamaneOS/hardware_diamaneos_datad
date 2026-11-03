@@ -94,4 +94,4 @@ neverallow { domain -diamaneos_datad -init -vendor_init -dumpstate } diamaneos_d
 neverallow { domain -rild -init -diamaneos_datad } diamaneos_datad:unix_stream_socket connectto;
 neverallow { domain -init -rild } diamaneos_datad_socket:sock_file { write append };
 neverallow { domain -init -vendor_init } diamaneos_datad_socket:sock_file { create unlink rename setattr };
-neverallow diamaneos_datad self:{ tcp_socket udp_socket rawip_socket packet_socket tipc_socket } *;
+neverallow diamaneos_datad self:{ tcp_socket udp_socket rawip_socket packet_socket tipc_socket netlink_xfrm_socket } *;

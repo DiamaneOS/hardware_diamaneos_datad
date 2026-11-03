@@ -5,3 +5,7 @@
 # 2990 to 2997 are in use in the FP6 tree. Keep the value unique in the registry of the product.
 [AID_VENDOR_DATAD]
 value: 2998
+
+# Vendor user of the Wi-Fi tunnel daemon.
+[AID_VENDOR_WLANTUNNEL]
+value: 2989

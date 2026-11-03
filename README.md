@@ -19,16 +19,25 @@ call path included. The open daemon does what `nicmd` did for them: it answers t
 the rmnet links, tells them when an interface comes up, goes down or changes, and keeps the calls of the data
 module alive across a restart of the daemon.
 
+A Wi-Fi call through the modem has a second daemon, `wlantunneld`. The closed IWLAN app and QCRIL keep call control
+and the modem negotiates IKE. The modem then asks the AP to carry the tunnel: `wlantunneld` makes the reverse links
+`r_rmnet_data0` to `3`, installs the ESP states and policies the modem names, configures the kernel module `rmnet_wlan`
+and holds the ports the modem asks for. It has its own user and SELinux domain, so a fault in the path of the ESP keys
+cannot take down cellular data or the emergency path, and the data daemon has no XFRM, TCP or UDP at all. Keys are held
+in a type that cannot be printed, and are zeroed with every buffer that held them.
+
 ## What is in it
 
 | Path | What |
 |---|---|
-| `crates/qmi` | QMI framing over QRTR and the WDS, WDA and DPM messages. The parsers cannot panic |
-| `crates/netcfg` | rtnetlink builders, ethtool features, control of the IPA device `rmnet_ipa0`, the `NetOps` seam, a stateful fake kernel (feature `fake`) and the Linux backend |
+| `crates/qmi` | QMI framing over QRTR and the WDS, WDA, DPM and DFS messages with the reverse transport of WDS. The parsers cannot panic |
+| `crates/netcfg` | rtnetlink, XFRM and `rmnet_wlan` builders, ethtool features, control of the IPA device `rmnet_ipa0`, the `NetOps` seam, a stateful fake kernel (feature `fake`) and the Linux backend |
 | `crates/datacore` | The data call engine. A simulated modem sits behind the feature `sim` |
 | `crates/wire` | The protocol between the libraries and the daemon, with its own types and limits. No dependencies |
 | `crates/datad` | The server of the daemon: route lookup, links, interface events, restart handling. No unsafe code |
 | `crates/datad-rt` | The libc calls of the daemon: QRTR and Unix sockets, poll, signals, the syscall filter, the log, and `main` (the binary `datad`) |
+| `crates/wlan-tunnel` | The logic of the Wi-Fi tunnel daemon: reverse links, ESP states and policies, `rmnet_wlan`, the ports of the modem. No unsafe code. A simulated modem and a fake kernel sit behind the feature `fake` |
+| `crates/wlantunneld` | The netlink and UDP sockets of the Wi-Fi tunnel daemon, its syscall table and `main` (the binary `wlantunneld`) |
 | `crates/nicm-compat` | The client of the interface manager requests over the protocol. Depends on `wire` only |
 | `crates/nicm-abi` | The structs between the two libraries and the switch for the stock layouts (`STOCK_ABI_VERIFIED`) |
 | `crates/libnicm` | The replacement for `libnicm.so`: the connection to the daemon |
@@ -46,7 +55,7 @@ to hold that.
 ```
 cargo test --offline
 cargo clippy --offline --all-targets -- -D warnings
-cargo check --offline --target aarch64-unknown-linux-gnu -p dataos-netcfg -p dataos-libnicm -p dataos-libnicm-dsi -p dataos-datad-rt
+cargo check --offline --target aarch64-unknown-linux-gnu -p dataos-netcfg -p dataos-libnicm -p dataos-libnicm-dsi -p dataos-datad-rt -p dataos-wlantunneld
 ```
 
 The host tests use a simulated modem, a fake of the kernel (links, IPA pipes, mux channels, ethtool features, the

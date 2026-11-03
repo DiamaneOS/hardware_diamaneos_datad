@@ -3,3 +3,5 @@
 /vendor/bin/datad       u:object_r:diamaneos_datad_exec:s0
 /dev/socket/datad       u:object_r:diamaneos_datad_socket:s0
 /dev/datad(/.*)?        u:object_r:diamaneos_datad_state:s0
+/vendor/bin/wlantunneld u:object_r:diamaneos_wlantunnel_exec:s0
+/dev/wlantunnel(/.*)?   u:object_r:diamaneos_wlantunnel_state:s0

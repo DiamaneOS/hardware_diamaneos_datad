@@ -15,3 +15,12 @@ diamaneos_datad diamaneos_datad_state:file { create open read write getattr rena
 diamaneos_datad self:unix_dgram_socket { create connect write }
 diamaneos_datad logdw_socket:sock_file write
 diamaneos_datad logd:unix_dgram_socket sendto
+# The Wi-Fi tunnel daemon: QRTR, the three netlink sockets, the sockets that hold ports and its state.
+diamaneos_wlantunnel self:qipcrtr_socket { create bind getattr read write }
+diamaneos_wlantunnel self:netlink_xfrm_socket { create bind setopt read write nlmsg }
+diamaneos_wlantunnel self:netlink_generic_socket { create bind setopt read write }
+diamaneos_wlantunnel self:netlink_route_socket { create bind setopt read write ioctl nlmsg }
+diamaneos_wlantunnel self:udp_socket { create setopt bind getattr connect }
+diamaneos_wlantunnel self:tcp_socket { create setopt bind getattr }
+diamaneos_wlantunnel diamaneos_wlantunnel_state:dir { search write add_name remove_name }
+diamaneos_wlantunnel diamaneos_wlantunnel_state:file { create open read write getattr rename unlink }

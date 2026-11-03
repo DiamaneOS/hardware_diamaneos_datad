@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+#
+# The Wi-Fi tunnel daemon: the reverse links, the ESP states and policies and the rmnet_wlan setup of a Wi-Fi call
+# whose IKE the modem keeps. It is apart from the data daemon so that a fault here cannot take down cellular data
+# or the emergency path. Installed with the binary (required: in crates/wlantunneld/Android.bp) only when the
+# device sets DIAMANEOS_DATAD=true.
+#
+# - Own vendor user (config.fs, UID 2989) and no supplementary group. The sockets that hold ports need no inet
+#   group: the check of netd allows a UID that is not in its map.
+# - NET_ADMIN only: XFRM, rules, link state and the rmnet_wlan commands.
+# - No standard output or error. Its own lines go to logd (tag wlantunneld) and carry no identifier, and the last 48
+#   are in /dev/wlantunnel/status, a tmpfs file for root.
+# - Not critical: a crash must never reboot the phone. init restarts it, and the new instance removes what the old
+#   one installed, by the state file in /dev/wlantunnel.
+service vendor.wlantunneld /vendor/bin/wlantunneld
+    class main
+    user vendor_wlantunnel
+    group vendor_wlantunnel
+    capabilities NET_ADMIN
+    # no "critical", no "oneshot"
+
+on early-boot
+    # tmpfs, so a reboot clears the state file by itself
+    mkdir /dev/wlantunnel 0700 vendor_wlantunnel vendor_wlantunnel

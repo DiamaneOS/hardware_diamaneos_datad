@@ -40,7 +40,7 @@ ifneq ($(wildcard $(addprefix $(DATAD_VENDOR_FILES)/,$(DATAD_STOCK_NICM))),)
 $(error datad: the vendor tree still has stock nicm files: $(wildcard $(addprefix $(DATAD_VENDOR_FILES)/,$(DATAD_STOCK_NICM))). Make it with diamaneos build vendor --datad)
 endif
 
-# The daemon, the two libraries that take the place of libnicm.so and libnicm_dsi.so, its init rc
-# (through the binary's required:), and the vendor user and group databases for the UID of
+# The daemon, the Wi-Fi tunnel daemon, the two libraries that take the place of libnicm.so and libnicm_dsi.so,
+# their init rc files (through the binaries' required:), and the vendor user and group databases for the UID of
 # config.fs (the same pair the IMS daemon adds).
-PRODUCT_PACKAGES += datad libnicm libnicm_dsi passwd_vendor group_vendor
+PRODUCT_PACKAGES += datad wlantunneld libnicm libnicm_dsi passwd_vendor group_vendor

@@ -2,3 +2,5 @@
 # Copyright 2026 The DiamaneOS Project
 # The per-link IPv6 switches of the daemon, by prefix. See datad.te.
 genfscon proc /sys/net/ipv6/conf/rmnet_data u:object_r:proc_net_rmnet_ipv6:s0
+# The per-link IPv6 switches of the Wi-Fi tunnel daemon, by prefix. See wlantunnel.te.
+genfscon proc /sys/net/ipv6/conf/r_rmnet_data u:object_r:proc_net_r_rmnet_ipv6:s0
