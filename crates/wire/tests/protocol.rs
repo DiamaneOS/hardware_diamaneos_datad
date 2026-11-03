@@ -152,13 +152,14 @@ fn the_interface_name_is_bounded_both_ways() {
         existing: false,
         companion: false,
         ifname,
+        tech: 0,
     };
     assert!(reply("n".repeat(MAX_IFNAME)).encode().is_ok());
     assert_eq!(
         reply("n".repeat(MAX_IFNAME + 1)).encode().unwrap_err(),
         EncodeError::TooLong
     );
-    let mut p = vec![0, 1, 0, (MAX_IFNAME + 1) as u8];
+    let mut p = vec![0, 1, 0, 0, 0, (MAX_IFNAME + 1) as u8];
     p.extend(std::iter::repeat_n(b'n', MAX_IFNAME + 1));
     assert_eq!(
         Notify::decode(&bytes(0x82, 1, &p)).unwrap_err(),
@@ -176,7 +177,7 @@ fn the_flags_of_a_route_reply_are_two_bits() {
         (4, false),
         (0xff, false),
     ] {
-        let p = vec![0, 1, flags, 0];
+        let p = vec![0, 1, flags, 0, 0, 0];
         let r = Notify::decode(&bytes(0x82, 1, &p));
         assert_eq!(r.is_ok(), ok, "flags {flags}");
         if !ok {
@@ -268,7 +269,7 @@ fn debug_hides_the_apn_and_the_addresses() {
 fn the_version_and_the_bytes_of_a_route_reply_are_pinned() {
     // A daemon and a library of different builds must not read each other's layouts: the
     // version changes with every layout, and these bytes change with it.
-    assert_eq!(VERSION, 4);
+    assert_eq!(VERSION, 5);
     let reply = Notify::RouteReply {
         txn: 7,
         code: ResultCode::Ok,
@@ -276,8 +277,9 @@ fn the_version_and_the_bytes_of_a_route_reply_are_pinned() {
         existing: true,
         companion: false,
         ifname: "rmnet_data3".into(),
+        tech: 0x8021,
     };
-    let mut want = vec![4, 0x82, 7, 0, 0, 0, 15, 0, 0, 3, 1, 11];
+    let mut want = vec![5, 0x82, 7, 0, 0, 0, 17, 0, 0, 3, 1, 0x21, 0x80, 11];
     want.extend_from_slice(b"rmnet_data3");
     assert_eq!(reply.encode().unwrap(), want);
     let both = Notify::RouteReply {
@@ -287,6 +289,7 @@ fn the_version_and_the_bytes_of_a_route_reply_are_pinned() {
         existing: false,
         companion: true,
         ifname: "rmnet_data3".into(),
+        tech: 0,
     };
     assert_eq!(both.encode().unwrap().get(10), Some(&2));
 }

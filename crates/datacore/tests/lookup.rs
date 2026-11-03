@@ -478,6 +478,7 @@ fn a_modem_restart_ends_every_lookup_and_a_cancelled_one_says_nothing() {
                 link: None,
                 companion: false,
                 answered: false,
+                technology: None,
             } => Some(token),
             _ => None,
         })
@@ -545,4 +546,40 @@ fn the_other_values_of_the_request_go_to_the_modem() {
     assert_eq!(f.tlv(0x34), Some(&[2u8, 1][..]));
     assert_eq!(f.tlv(0x3c), Some(&[1u8][..]));
     assert_eq!(f.tlv(0x3d), Some(&[2u8][..]));
+}
+
+#[test]
+fn the_technology_of_the_first_answer_comes_with_the_end_of_the_lookup() {
+    let mut e = up();
+    e.qmi_mut().route_no_block = true;
+    let block: &[u8] = &[0, 0, 0, 0, 0, 0, 0, 0, 0x21, 0x80];
+    let other: &[u8] = &[0, 0, 0, 0, 0, 0, 0, 0, 0x80, 0x88];
+    answer(&mut e, 4, &[(0x01, block)]);
+    answer(&mut e, 6, &[(0x01, other)]);
+    e.start_lookup(5, 7, query(Family::V4)).unwrap();
+    pump(&mut e, 5);
+    assert!(matches!(
+        e.take_events().as_slice(),
+        [Event::LookupDone {
+            token: 7,
+            technology: Some(0x8021),
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn a_lookup_that_got_no_answer_has_no_technology() {
+    let mut e = up();
+    e.start_lookup(5, 7, query(Family::V4)).unwrap();
+    // the modem's answers wait in its queue past the deadline
+    e.tick(5 + 2_000);
+    assert!(matches!(
+        e.take_events().as_slice(),
+        [Event::LookupDone {
+            answered: false,
+            technology: None,
+            ..
+        }]
+    ));
 }

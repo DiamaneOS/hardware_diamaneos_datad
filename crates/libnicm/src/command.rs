@@ -74,6 +74,10 @@ fn route_request(cmd: &NicmCmd) -> Result<RouteRequest, u32> {
 pub fn begin<T: Transport>(c: &mut Client<T>, cmd: &NicmCmd) -> Result<Pending, u32> {
     let bad = status::BAD_ARGUMENT;
     let sent = match cmd.kind {
+        // the preference alone: nothing of a request that went through before can fail here
+        kind::ROUTE_LOOKUP if cmd.hint_mask & hint::XT_PREF != 0 => {
+            c.route_lookup_pref(route_request(cmd)?, (cmd.xt_pref & 0xffff) as u16)
+        }
         kind::ROUTE_LOOKUP => c.route_lookup(route_request(cmd)?),
         kind::MATCHING_CALL => c.matching_call(route_request(cmd)?, match_hint(cmd)?),
         kind::LINK_RELEASE => c.link_release(small(cmd.link).ok_or(bad)?),
@@ -113,8 +117,10 @@ pub fn reply_of(r: Result<Reply, NicmError>) -> NicmReply {
             existing,
             companion,
             ifname,
+            tech,
         }) => {
             let mut out = NicmReply::failed(status::OK);
+            out.tech = u32::from(tech);
             out.link = u32::from(link);
             out.existing = u32::from(existing);
             out.companion = u32::from(companion);

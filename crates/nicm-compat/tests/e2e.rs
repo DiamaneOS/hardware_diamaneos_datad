@@ -130,7 +130,8 @@ fn a_lookup_a_call_and_a_release_through_the_whole_stack() {
             link: 0,
             existing: false,
             companion: false,
-            ifname: "rmnet_data0".into()
+            ifname: "rmnet_data0".into(),
+            tech: 0,
         }
     );
     // the module's own call connects
@@ -307,7 +308,8 @@ fn a_call_that_is_up_is_found_again_with_the_matching_call_request() {
             link: 0,
             existing: true,
             companion: false,
-            ifname: "rmnet_data0".into()
+            ifname: "rmnet_data0".into(),
+            tech: 0,
         })
     );
     // the answer was the call's own, nothing new was taken

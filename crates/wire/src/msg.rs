@@ -19,6 +19,12 @@ pub enum Request {
         txn: u32,
         req: RouteRequest,
     },
+    /// A route lookup with the extended technology preference of the request, which the modem is asked with.
+    RouteLookupPref {
+        txn: u32,
+        req: RouteRequest,
+        xt_pref: u16,
+    },
     /// Is there a call for this request that the module can use again? Answered with a `RouteReply`
     /// naming its link, or with `NoMatch` when there is none. The hint is what nicmd passes on to the modem.
     MatchingCall {
@@ -106,6 +112,8 @@ pub enum Notify {
         /// That call is the other IP family of the same request.
         companion: bool,
         ifname: String,
+        /// The technology for a Wi-Fi call that the modem named, 0 for none.
+        tech: u16,
     },
     /// The answer to a request that has nothing to return but a result.
     Done {
@@ -134,6 +142,7 @@ mod ty {
     // never did and the libraries now answer themselves. They are no types.
     pub const SCREEN_STATE: u8 = 7;
     pub const MATCHING_CALL: u8 = 9;
+    pub const ROUTE_LOOKUP_PREF: u8 = 10;
     pub const HELLO_ACK: u8 = 0x81;
     pub const ROUTE_REPLY: u8 = 0x82;
     pub const DONE: u8 = 0x83;
@@ -150,6 +159,11 @@ impl Request {
             Request::RouteLookup { txn, req } => {
                 put_route_request(&mut w, req)?;
                 (ty::ROUTE_LOOKUP, *txn)
+            }
+            Request::RouteLookupPref { txn, req, xt_pref } => {
+                put_route_request(&mut w, req)?;
+                w.u16(*xt_pref);
+                (ty::ROUTE_LOOKUP_PREF, *txn)
             }
             Request::MatchingCall { txn, req, hint } => {
                 put_route_request(&mut w, req)?;
@@ -185,6 +199,11 @@ impl Request {
             ty::ROUTE_LOOKUP => Request::RouteLookup {
                 txn,
                 req: get_route_request(&mut r)?,
+            },
+            ty::ROUTE_LOOKUP_PREF => Request::RouteLookupPref {
+                txn,
+                req: get_route_request(&mut r)?,
+                xt_pref: r.u16()?,
             },
             ty::MATCHING_CALL => Request::MatchingCall {
                 txn,
@@ -446,10 +465,12 @@ impl Notify {
                 existing,
                 companion,
                 ifname,
+                tech,
             } => {
                 w.u8(code.code());
                 w.u8(*link);
                 w.u8(u8::from(*existing) | (u8::from(*companion) << 1));
+                w.u16(*tech);
                 w.str(ifname, MAX_IFNAME)?;
                 w.frame(ty::ROUTE_REPLY, *txn)
             }
@@ -489,6 +510,7 @@ impl Notify {
                 if flags > 3 {
                     return Err(DecodeError::Value);
                 }
+                let tech = r.u16()?;
                 Notify::RouteReply {
                     txn: number,
                     code,
@@ -496,6 +518,7 @@ impl Notify {
                     existing: flags & 1 != 0,
                     companion: flags & 2 != 0,
                     ifname: r.str(MAX_IFNAME)?,
+                    tech,
                 }
             }
             ty::DONE => Notify::Done {

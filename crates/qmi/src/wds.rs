@@ -369,6 +369,8 @@ pub struct RouteAnswer {
     pub instance: Option<u8>,
     pub mux: Option<u8>,
     pub endpoint: Option<(u32, u32)>,
+    /// The technology of the data system, the last two bytes of TLV 0x01.
+    pub technology: u16,
 }
 
 /// The answer to a route lookup. A refusal of the modem is an error, an answer without an
@@ -382,9 +384,8 @@ pub fn parse_route_lookup(f: &Frame<'_>) -> Result<RouteAnswer, Error> {
     }
     // nicmd takes the answer for good only with the block of TLV 0x01 (`processRouteLookupRespParam`
     // 0x507ec to 0x50850, the only place its result becomes 0), 10 bytes of which it keeps
-    if f.required(0x01)?.len() != 10 {
-        return Err(Error::Length);
-    }
+    let block: [u8; 10] = f.required(0x01)?.try_into().map_err(|_| Error::Length)?;
+    let [.., t0, t1] = block;
     let endpoint = match f.tlv(0x12) {
         None => None,
         Some(v) => {
@@ -396,6 +397,7 @@ pub fn parse_route_lookup(f: &Frame<'_>) -> Result<RouteAnswer, Error> {
         instance: f.tlv(0x10).map(u8_value).transpose()?,
         mux: f.tlv(0x13).map(u8_value).transpose()?,
         endpoint,
+        technology: u16::from_le_bytes([t0, t1]),
     })
 }
 
@@ -1206,7 +1208,8 @@ mod tests {
             RouteAnswer {
                 instance: None,
                 mux: None,
-                endpoint: None
+                endpoint: None,
+                technology: 0,
             }
         );
         let full = answer(|b| {
@@ -1222,9 +1225,23 @@ mod tests {
             RouteAnswer {
                 instance: Some(4),
                 mux: Some(5),
-                endpoint: Some((4, 1))
+                endpoint: Some((4, 1)),
+                technology: 0,
             }
         );
+    }
+
+    #[test]
+    fn the_technology_is_the_last_two_bytes_of_the_block() {
+        let b = Builder::response(3, id::ROUTE_LOOKUP)
+            .ok()
+            .unwrap()
+            .tlv(0x01, &[9, 9, 9, 9, 9, 9, 9, 9, 0x21, 0x80])
+            .unwrap()
+            .build()
+            .unwrap();
+        let a = parse_route_lookup(&Frame::parse(&b).unwrap()).unwrap();
+        assert_eq!(a.technology, 0x8021);
     }
 
     #[test]

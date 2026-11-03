@@ -11,13 +11,14 @@
 //! the other or the emergency reserve.
 use crate::convert;
 use crate::table::{self, Dead, Proc, Row};
-use dataos_datacore::engine::{Engine, Qmi, ServiceEvent};
+use dataos_datacore::engine::{Engine, Qmi, ServiceEvent, MAX_LOOKUPS};
 use dataos_datacore::trace::{self, Trace};
 use dataos_datacore::Look;
 use dataos_datacore::{
     CallId, ClientId, Event, Family, LookupHint, LookupQuery, Priority, StartError,
 };
 use dataos_netcfg::NetOps;
+use dataos_qmi::reverse;
 use dataos_wire::{DecodeError, IfaceEvent, MatchHint, Notify, Request, ResultCode, RouteRequest};
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -308,6 +309,8 @@ pub struct Server<Q: Qmi, N: NetOps> {
     reclaimed_links: u32,
     /// Matching-call questions the modem has not answered, by the token of the engine's lookup.
     pending_matches: BTreeMap<u32, PendingMatch>,
+    /// Route replies that wait for the modem to name its technology, by the token of the question.
+    pending_routes: BTreeMap<u32, (ConnId, Notify)>,
     /// Questions about a link that has not come up, by token, with the link they are about.
     pending_checks: BTreeMap<u32, u8>,
     next_lookup: u32,
@@ -340,6 +343,8 @@ pub struct Server<Q: Qmi, N: NetOps> {
 /// Questions about links that have not come up that may be open at once. The rest of the engine's
 /// places are for the questions of matching calls, which a thread of the module waits for.
 const MAX_CHECKS: usize = 4;
+/// Lookups the questions of technology preferences leave free for the lookups that cannot wait.
+const LOOKUPS_KEPT_FREE: usize = MAX_LOOKUPS / 2;
 
 impl<Q: Qmi, N: NetOps> Server<Q, N> {
     pub fn new(cfg: ServerConfig, engine: Engine<Q, N>) -> Self {
@@ -362,6 +367,7 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
             kept_releases: 0,
             reclaimed_links: 0,
             pending_matches: BTreeMap::new(),
+            pending_routes: BTreeMap::new(),
             pending_checks: BTreeMap::new(),
             next_lookup: 1,
             tombstones: BTreeMap::new(),
@@ -652,6 +658,16 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
             self.pending_matches.remove(&token);
             self.engine.cancel_lookup(token);
         }
+        let open: Vec<u32> = self
+            .pending_routes
+            .iter()
+            .filter(|(_, (c, _))| *c == conn)
+            .map(|(t, _)| *t)
+            .collect();
+        for token in open {
+            self.pending_routes.remove(&token);
+            self.engine.cancel_lookup(token);
+        }
         // what was queued for it and not written is still owed
         let mut given_back: Vec<(u8, Proc)> = Vec::new();
         for (link, t) in self
@@ -922,8 +938,11 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
                     link,
                     companion,
                     answered,
+                    technology,
                 } => {
-                    if self.pending_checks.contains_key(&token) {
+                    if self.pending_routes.contains_key(&token) {
+                        self.route_done(token, technology);
+                    } else if self.pending_checks.contains_key(&token) {
                         self.check_done(now, token, link, answered);
                     } else {
                         self.lookup_done(token, link, companion);
@@ -1213,6 +1232,9 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
         match req {
             Request::Hello => vec![Notify::HelloAck { ready }],
             Request::RouteLookup { txn, req } => vec![self.route_lookup(now, conn, txn, req)],
+            Request::RouteLookupPref { txn, req, xt_pref } => {
+                self.route_lookup_pref(now, conn, txn, req, xt_pref)
+            }
             Request::MatchingCall { txn, req, hint } => {
                 self.matching_call(now, conn, txn, req, hint)
             }
@@ -1726,6 +1748,75 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
             existing: true,
             companion,
             ifname: info.ifname,
+            tech: 0,
+        }
+    }
+
+    /// A route lookup with a technology preference. The link is chosen as for any lookup, and the modem is asked
+    /// with the preference before the reply goes out, because a Wi-Fi call needs the technology it names. An
+    /// emergency call never waits for that question and never goes through it. The question has the deadline of the
+    /// engine, and a reply without an answer is the same as one that was not asked.
+    fn route_lookup_pref(
+        &mut self,
+        now: u64,
+        conn: ConnId,
+        txn: u32,
+        req: RouteRequest,
+        xt_pref: u16,
+    ) -> Vec<Notify> {
+        if self.is_emergency(&req) {
+            return vec![self.route_lookup(now, conn, txn, req)];
+        }
+        let query = LookupQuery {
+            subscription: req.slot,
+            family: convert::engine_family(req.family),
+            apn: req.apn.clone(),
+            apn_type: (req.apn_type != dataos_nicm_abi::APN_TYPE_NOT_SET).then_some(req.apn_type),
+            apn_type_mask: (req.apn_type_mask != 0).then_some(req.apn_type_mask),
+            hint: LookupHint {
+                xt_pref: Some(xt_pref),
+                ..LookupHint::default()
+            },
+        };
+        let reply = self.route_lookup(now, conn, txn, req);
+        if !matches!(
+            reply,
+            Notify::RouteReply {
+                code: ResultCode::Ok,
+                ..
+            }
+        ) {
+            return vec![reply];
+        }
+        // the question is a nicety and the table is shared with lookups an emergency call can need
+        if self.engine.lookup_room() <= LOOKUPS_KEPT_FREE {
+            return vec![reply];
+        }
+        let token = self.next_lookup;
+        self.next_lookup = self.next_lookup.wrapping_add(1);
+        match self.engine.start_lookup(now, token, query) {
+            Ok(()) => {
+                self.pending_routes.insert(token, (conn, reply));
+                Vec::new()
+            }
+            Err(_) => vec![reply],
+        }
+    }
+
+    /// The modem answered the question of a route lookup, or its time was over.
+    fn route_done(&mut self, token: u32, technology: Option<u16>) {
+        let Some((conn, mut reply)) = self.pending_routes.remove(&token) else {
+            return;
+        };
+        self.engine
+            .trace(Trace::RouteTechnology(technology.unwrap_or(0)));
+        if let Notify::RouteReply { tech, .. } = &mut reply {
+            *tech = technology
+                .filter(|t| reverse::tech::is_iwlan(*t))
+                .unwrap_or(0);
+        }
+        if let Some(c) = self.conns.get_mut(&conn) {
+            c.queue(reply);
         }
     }
 
@@ -1737,6 +1828,7 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
             existing,
             companion: existing,
             ifname,
+            tech: 0,
         };
         let fail = |code| reply(code, 0, String::new(), false);
         if !self.engine.is_ready() {
@@ -1895,7 +1987,7 @@ impl<Q: Qmi, N: NetOps> Server<Q, N> {
 fn request_name(r: &Request) -> &'static str {
     match r {
         Request::Hello => "readiness question",
-        Request::RouteLookup { .. } => "route lookup",
+        Request::RouteLookup { .. } | Request::RouteLookupPref { .. } => "route lookup",
         Request::MatchingCall { .. } => "matching call",
         Request::LinkRelease { .. } => "link release",
         Request::QueryMtu { .. } => "mtu query",
@@ -1925,6 +2017,7 @@ fn refusal(txn: u32, code: ResultCode) -> Notify {
         existing: false,
         companion: false,
         ifname: String::new(),
+        tech: 0,
     }
 }
 

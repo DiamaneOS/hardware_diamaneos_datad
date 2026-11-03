@@ -222,10 +222,12 @@ pub struct NicmReply {
     /// A route reply: the modem has the call already, and it is the other family's.
     pub existing: u32,
     pub companion: u32,
+    /// A route reply: the technology for a Wi-Fi call that the modem named, 0 for none.
+    pub tech: u32,
     pub pad: [u8; REPLY_PAD],
 }
 
-const REPLY_USED: usize = 52;
+const REPLY_USED: usize = 56;
 const REPLY_PAD: usize = REPLY_LEN - REPLY_USED;
 
 impl NicmReply {
@@ -246,6 +248,7 @@ impl NicmReply {
             ifname: [0; IFNAME_LEN],
             existing: 0,
             companion: 0,
+            tech: 0,
             pad: [0; REPLY_PAD],
         }
     }

@@ -128,11 +128,16 @@ pub fn gen_event(rng: &mut Rng) -> IfaceEvent {
 pub fn gen_request(rng: &mut Rng) -> Request {
     let txn = rng.next() as u32;
     let link = rng.byte();
-    match rng.below(6) {
+    match rng.below(7) {
         0 => Request::Hello,
         1 => Request::RouteLookup {
             txn,
             req: gen_route(rng),
+        },
+        6 => Request::RouteLookupPref {
+            txn,
+            req: gen_route(rng),
+            xt_pref: rng.next() as u16,
         },
         2 => Request::LinkRelease { txn, link },
         3 => Request::QueryMtu { txn, link },
@@ -170,6 +175,7 @@ pub fn gen_notify(rng: &mut Rng) -> Notify {
             existing: rng.chance(50),
             companion: rng.chance(50),
             ifname: gen_name(rng, MAX_IFNAME),
+            tech: rng.next() as u16,
         },
         3 => Notify::Done {
             txn,
@@ -202,6 +208,11 @@ pub fn sample_route() -> RouteRequest {
 pub fn all_requests() -> Vec<Request> {
     vec![
         Request::Hello,
+        Request::RouteLookupPref {
+            txn: 7,
+            req: sample_route(),
+            xt_pref: 0x8021,
+        },
         Request::RouteLookup {
             txn: 7,
             req: sample_route(),
@@ -246,6 +257,7 @@ pub fn all_notifies() -> Vec<Notify> {
             existing: true,
             companion: true,
             ifname: "rmnet_data3".into(),
+            tech: 0x8021,
         },
         Notify::RouteReply {
             txn: 7,
@@ -254,6 +266,7 @@ pub fn all_notifies() -> Vec<Notify> {
             existing: false,
             companion: false,
             ifname: String::new(),
+            tech: 0,
         },
         Notify::Done {
             txn: 8,

@@ -79,6 +79,7 @@ fn notify(rng: &mut Rng, known: &[u32]) -> Notify {
             existing: rng.chance(50),
             companion: rng.chance(50),
             ifname: "rmnet_data1".into(),
+            tech: 0,
         },
         3 | 4 => Notify::Done {
             txn,
@@ -205,6 +206,7 @@ fn an_answer_of_another_kind_is_not_the_answer() {
             existing: false,
             companion: false,
             ifname: "rmnet_data1".into(),
+            tech: 0,
         },
     ] {
         c.transport_mut().inbox.push_back(n);

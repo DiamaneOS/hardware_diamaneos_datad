@@ -260,6 +260,8 @@ pub enum Event {
         link: Option<usize>,
         companion: bool,
         answered: bool,
+        /// The technology in the first answer of the modem.
+        technology: Option<u16>,
     },
 }
 

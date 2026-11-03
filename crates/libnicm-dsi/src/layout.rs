@@ -324,12 +324,21 @@ pub fn read_request(b: &[u8]) -> Result<Request, Bad> {
 /// Inferred, not read from a stock log.
 pub const TECH_DEFAULT: u32 = 0x8880;
 
+/// What `route_out::TECH` carries: a technology of a Wi-Fi call as the modem named it, and `TECH_DEFAULT` for anything
+/// else, so a cellular value stays what it always was.
+pub fn route_tech(tech: u32) -> u32 {
+    match tech {
+        0x8020 | 0x8021 | 0x8040 | 0x8080 => tech,
+        _ => TECH_DEFAULT,
+    }
+}
+
 /// Write the answer of a route lookup into the module's 960 byte buffer. `existing` is nicmd's "the
 /// modem returned an instance" (the field the module reads as "route found", 0 for a new call) and
 /// `companion` its "the instance is the other family's". The buffer
 /// is zeroed first, as the stock function does. False: the link is not one the
 /// module can name, or the buffer is too short.
-pub fn write_route(out: &mut [u8], link: u32, existing: bool, companion: bool) -> bool {
+pub fn write_route(out: &mut [u8], link: u32, existing: bool, companion: bool, tech: u32) -> bool {
     for b in out.iter_mut() {
         *b = 0;
     }
@@ -340,7 +349,7 @@ pub fn write_route(out: &mut [u8], link: u32, existing: bool, companion: bool) -
         && wr_u32(out, route_out::COMPANION, u32::from(companion))
         && wr_u32(out, route_out::LINK, link)
         && wr_u32(out, route_out::MODEM, 0)
-        && wr_u32(out, route_out::TECH, TECH_DEFAULT)
+        && wr_u32(out, route_out::TECH, route_tech(tech))
 }
 
 /// Write the answer of a matching-call query: the device name and the mark that it is there. The
@@ -579,9 +588,22 @@ mod tests {
     }
 
     #[test]
+    fn a_wifi_technology_goes_through_and_any_other_keeps_the_default() {
+        let mut out = vec![0u8; INFO_LEN];
+        for tech in [0x8020, 0x8021, 0x8040, 0x8080] {
+            assert!(write_route(&mut out, 3, false, false, tech));
+            assert_eq!(rd_u32(&out, route_out::TECH), Some(tech));
+        }
+        for tech in [0, 0x8880, 0x8001, 0x8004, 0x8840, 1] {
+            assert!(write_route(&mut out, 3, false, false, tech));
+            assert_eq!(rd_u32(&out, route_out::TECH), Some(TECH_DEFAULT));
+        }
+    }
+
+    #[test]
     fn the_route_answer_lands_where_the_module_reads_it() {
         let mut out = vec![0xaau8; INFO_LEN];
-        assert!(write_route(&mut out, 3, false, false));
+        assert!(write_route(&mut out, 3, false, false, 0));
         assert_eq!(
             rd_u32(&out, route_out::VALID),
             Some(0),
@@ -595,16 +617,22 @@ mod tests {
         assert_eq!(rd_u8(&out, INFO_LEN - 1), Some(0));
         // a link the module cannot name, and a buffer that is too short
         let mut out = vec![0xaau8; INFO_LEN];
-        assert!(write_route(&mut out, MAX_LINK, false, false));
-        assert!(!write_route(&mut out, MAX_LINK + 1, true, true));
+        assert!(write_route(&mut out, MAX_LINK, false, false, 0));
+        assert!(!write_route(&mut out, MAX_LINK + 1, true, true, 0));
         assert_eq!(rd_u32(&out, route_out::VALID), Some(0));
-        assert!(!write_route(&mut vec![0u8; INFO_LEN - 1], 0, false, false));
+        assert!(!write_route(
+            &mut vec![0u8; INFO_LEN - 1],
+            0,
+            false,
+            false,
+            0
+        ));
         // the other family of a call that is up: the instance exists and it is the companion's
-        assert!(write_route(&mut out, 4, true, true));
+        assert!(write_route(&mut out, 4, true, true, 0));
         assert_eq!(rd_u32(&out, route_out::VALID), Some(1));
         assert_eq!(rd_u32(&out, route_out::COMPANION), Some(1));
         assert_eq!(rd_u32(&out, route_out::LINK), Some(4));
-        assert!(write_route(&mut out, 4, true, false));
+        assert!(write_route(&mut out, 4, true, false, 0));
         assert_eq!(rd_u32(&out, route_out::COMPANION), Some(0));
     }
 

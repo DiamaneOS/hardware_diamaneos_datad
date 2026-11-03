@@ -35,6 +35,8 @@ pub enum Answer {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trace {
+    /// A route lookup with a technology preference: the technology the modem named, 0 for no answer.
+    RouteTechnology(u16),
     /// The modem's data services (WDA, DPM and WDS) are all announced.
     ModemUp,
     ModemDown,
@@ -83,6 +85,9 @@ impl Trace {
     /// The line for the log, without any identifier.
     pub fn line(&self) -> String {
         match self {
+            Trace::RouteTechnology(t) => {
+                format!("route lookup: the modem names technology {t:#06x}")
+            }
             Trace::ModemUp => "modem data services are up".into(),
             Trace::ModemDown => "modem data services are gone".into(),
             Trace::BringupStart(n) => format!("bring-up attempt {n}"),

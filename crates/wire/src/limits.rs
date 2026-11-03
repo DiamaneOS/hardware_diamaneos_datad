@@ -6,7 +6,7 @@
 #![allow(clippy::arithmetic_side_effects)]
 
 /// Protocol version byte. Changes whenever a message layout changes.
-pub const VERSION: u8 = 4;
+pub const VERSION: u8 = 5;
 pub const HEADER_LEN: usize = 8;
 /// Largest datagram either side sends or accepts. Every message is far smaller.
 pub const MAX_MESSAGE: usize = 256;

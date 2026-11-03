@@ -38,6 +38,7 @@ pub(super) struct Lookup {
     client: ClientId,
     step: Step,
     txn: u16,
+    technology: Option<u16>,
     pub(super) deadline: u64,
 }
 
@@ -81,10 +82,16 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
                 client,
                 step: Step::BindSub,
                 txn,
+                technology: None,
                 deadline,
             },
         );
         Ok(())
+    }
+
+    /// How many more lookups the table has room for.
+    pub fn lookup_room(&self) -> usize {
+        MAX_LOOKUPS.saturating_sub(self.lookups.len())
     }
 
     /// The layer above does not want the answer any more (its connection closed). Nothing is reported.
@@ -126,6 +133,7 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
                 link,
                 companion,
                 answered,
+                technology: l.technology,
             });
         }
     }
@@ -167,6 +175,9 @@ impl<Q: Qmi, N: NetOps> Engine<Q, N> {
                 let Ok(answer) = wds::parse_route_lookup(&f) else {
                     return self.bad_lookup(token);
                 };
+                if let Some(l) = self.lookups.get_mut(&token) {
+                    l.technology.get_or_insert(answer.technology);
+                }
                 match (self.link_named(&answer), step) {
                     (Some(link), _) => {
                         self.finish_lookup(token, Some(link), step == Step::Companion, true)

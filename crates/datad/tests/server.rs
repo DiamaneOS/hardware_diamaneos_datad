@@ -1614,7 +1614,8 @@ fn a_second_request_for_the_apn_of_a_call_that_is_up_gets_that_interface() {
             link: 0,
             existing: true,
             companion: false,
-            ifname: "rmnet_data0".into()
+            ifname: "rmnet_data0".into(),
+            tech: 0,
         }
     );
     // no new link and no new call: the interface is the one that is up
@@ -1659,7 +1660,8 @@ fn the_other_family_of_a_call_that_is_up_is_found_with_the_companion_question() 
             link: 0,
             existing: true,
             companion: true,
-            ifname: "rmnet_data0".into()
+            ifname: "rmnet_data0".into(),
+            tech: 0,
         }
     );
     assert_eq!(lookups_asked(&mut s), 2);
@@ -3032,4 +3034,142 @@ fn the_daemon_becoming_ready_is_traced() {
     s.engine().take_trace();
     modem_up(&mut s);
     assert!(s.engine().take_trace().contains(&Trace::ReadyChanged(true)));
+}
+
+// ---- the route lookup with a technology preference --------------------------------------------
+
+/// The modem answers a route lookup for IPv4 with this technology in its block.
+fn modem_technology(s: &mut S, tech: u16) {
+    let mut block = vec![0u8; 8];
+    block.extend(tech.to_le_bytes());
+    let q = s.engine().qmi_mut();
+    q.route_no_block = true;
+    q.route_answers.insert(4, vec![(0x01, block)]);
+}
+
+fn lookup_pref(s: &mut S, c: u32, txn: u32, req: RouteRequest, xt_pref: u16) {
+    s.request(1, c, Request::RouteLookupPref { txn, req, xt_pref });
+}
+
+fn tech_of(n: &Notify) -> u16 {
+    match n {
+        Notify::RouteReply { tech, .. } => *tech,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_preference_goes_to_the_modem_and_a_wifi_technology_comes_back_with_the_link() {
+    let mut s = server();
+    modem_up(&mut s);
+    let c = accept(&mut s);
+    modem_technology(&mut s, 0x8021);
+    lookup_pref(&mut s, c, 5, route(0, Family::V4, "ims.example", 0), 0x8021);
+    // nothing until the modem answered
+    assert!(s
+        .drain(c)
+        .iter()
+        .all(|n| !matches!(n, Notify::RouteReply { .. })));
+    pump(&mut s, 1);
+    let reply = take_reply(&mut s, c, 5);
+    assert_eq!(link_of(&reply), 0);
+    assert_eq!(tech_of(&reply), 0x8021);
+    let frame = s.engine().qmi_mut().route_frames[0].1.clone();
+    let f = dataos_qmi::Frame::parse(&frame).unwrap();
+    assert_eq!(f.tlv(0x34), Some(&[0x21, 0x80][..]));
+}
+
+#[test]
+fn a_cellular_technology_is_not_passed_on() {
+    let mut s = server();
+    modem_up(&mut s);
+    let c = accept(&mut s);
+    modem_technology(&mut s, 0x8880);
+    lookup_pref(&mut s, c, 5, route(0, Family::V4, "a.example", 0), 1);
+    pump(&mut s, 1);
+    let reply = take_reply(&mut s, c, 5);
+    assert_eq!(code_of(&reply), ResultCode::Ok);
+    assert_eq!(tech_of(&reply), 0);
+}
+
+#[test]
+fn a_lookup_without_a_preference_does_not_ask_the_modem() {
+    let mut s = server();
+    modem_up(&mut s);
+    let c = accept(&mut s);
+    let reply = lookup(&mut s, c, 5, route(0, Family::V4, "a.example", 0));
+    assert_eq!(tech_of(&reply), 0);
+    assert_eq!(lookups_asked(&mut s), 0);
+}
+
+#[test]
+fn an_emergency_lookup_with_a_preference_is_answered_at_once_and_asks_nothing() {
+    let mut s = server();
+    modem_up(&mut s);
+    let c = accept(&mut s);
+    // nothing of the modem is run between the request and the answer
+    modem_technology(&mut s, 0x8021);
+    let emergency = route_typed(Family::V4, "sos", 512, 0);
+    lookup_pref(&mut s, c, 5, emergency, 0x8021);
+    let reply = take_reply(&mut s, c, 5);
+    assert_eq!(code_of(&reply), ResultCode::Ok);
+    assert_eq!(tech_of(&reply), 0);
+    assert_eq!(lookups_asked(&mut s), 0);
+    let q = s.engine().qmi_mut();
+    assert!(q.route_frames.is_empty());
+}
+
+#[test]
+fn a_refused_lookup_with_a_preference_asks_nothing() {
+    let mut s = server();
+    let c = accept(&mut s);
+    lookup_pref(&mut s, c, 5, route(0, Family::V4, "a.example", 0), 1);
+    let reply = take_reply(&mut s, c, 5);
+    assert_eq!(code_of(&reply), ResultCode::NotReady);
+    assert_eq!(lookups_asked(&mut s), 0);
+}
+
+#[test]
+fn a_modem_that_does_not_answer_costs_the_deadline_and_the_link_is_still_given() {
+    let mut s = server();
+    modem_up(&mut s);
+    let c = accept(&mut s);
+    lookup_pref(&mut s, c, 5, route(0, Family::V4, "a.example", 0), 1);
+    // the modem's answers wait in its queue past the deadline
+    assert!(s
+        .drain(c)
+        .iter()
+        .all(|n| !matches!(n, Notify::RouteReply { .. })));
+    s.tick(1 + 2_000);
+    let reply = take_reply(&mut s, c, 5);
+    assert_eq!(link_of(&reply), 0);
+    assert_eq!(tech_of(&reply), 0);
+}
+
+#[test]
+fn a_connection_that_closes_ends_the_question_of_its_route_lookup() {
+    let mut s = server();
+    modem_up(&mut s);
+    let c = accept(&mut s);
+    lookup_pref(&mut s, c, 5, route(0, Family::V4, "a.example", 0), 1);
+    s.close(1, c);
+    pump(&mut s, 1);
+    assert!(s.engine().take_events().is_empty());
+}
+
+#[test]
+fn the_questions_of_preferences_leave_room_in_the_lookup_table() {
+    let mut s = server();
+    modem_up(&mut s);
+    let c = accept(&mut s);
+    modem_technology(&mut s, 0x8021);
+    for txn in 0..4 {
+        lookup_pref(&mut s, c, txn, route(0, Family::V4, "a.example", 0), 0x8021);
+    }
+    let room = s.engine().lookup_room();
+    assert_eq!(room, dataos_datacore::engine::MAX_LOOKUPS - 4);
+    lookup_pref(&mut s, c, 4, route(0, Family::V4, "a.example", 0), 0x8021);
+    // answered at once, with no question
+    assert_eq!(code_of(&take_reply(&mut s, c, 4)), ResultCode::Ok);
+    assert_eq!(s.engine().lookup_room(), room);
 }

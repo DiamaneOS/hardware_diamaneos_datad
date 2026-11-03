@@ -58,6 +58,8 @@ pub struct Link {
     pub existing: bool,
     /// That call is the other IP family's.
     pub companion: bool,
+    /// The technology for a Wi-Fi call that the modem named, 0 for none.
+    pub tech: u32,
 }
 
 /// What the data module wants a link for. Only what the daemon uses.
@@ -131,6 +133,7 @@ fn link_for(s: &dyn Sender, hndl: usize, k: u32, l: &Lookup<'_>) -> Result<Link,
         ifname,
         existing: r.existing == 1,
         companion: r.companion == 1,
+        tech: r.tech,
     })
 }
 

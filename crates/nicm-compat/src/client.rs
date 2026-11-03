@@ -44,6 +44,8 @@ pub enum Reply {
         existing: bool,
         companion: bool,
         ifname: String,
+        /// The technology for a Wi-Fi call that the modem named, 0 for none.
+        tech: u16,
     },
     Done,
     Mtu {
@@ -155,6 +157,15 @@ impl<T: Transport> Client<T> {
         self.begin(Kind::Route, |txn| Request::RouteLookup { txn, req })
     }
 
+    /// A route lookup with the extended technology preference of the request.
+    pub fn route_lookup_pref(&mut self, req: RouteRequest, xt_pref: u16) -> Result<u32, NicmError> {
+        self.begin(Kind::Route, |txn| Request::RouteLookupPref {
+            txn,
+            req,
+            xt_pref,
+        })
+    }
+
     /// Is there a call the module can use again? The answer is a `Reply::Route` with the link and
     /// the name of its interface, or a refusal with `ResultCode::NoMatch`.
     pub fn matching_call(&mut self, req: RouteRequest, hint: MatchHint) -> Result<u32, NicmError> {
@@ -239,6 +250,7 @@ impl<T: Transport> Client<T> {
                     existing,
                     companion,
                     ifname,
+                    tech,
                 } => self.answer(
                     txn,
                     Kind::Route,
@@ -248,6 +260,7 @@ impl<T: Transport> Client<T> {
                         existing,
                         companion,
                         ifname,
+                        tech,
                     },
                 ),
                 Notify::Done { txn, code } => self.answer(txn, Kind::Done, code, Reply::Done),

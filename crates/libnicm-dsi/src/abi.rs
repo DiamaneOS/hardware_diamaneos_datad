@@ -258,7 +258,7 @@ impl StockAbi {
         let Ok(link) = glue::route_lookup(s, hndl, &lookup) else {
             return FAIL;
         };
-        if layout::write_route(out, link.number, link.existing, link.companion) {
+        if layout::write_route(out, link.number, link.existing, link.companion, link.tech) {
             OK
         } else {
             // a link the module cannot name: give it back

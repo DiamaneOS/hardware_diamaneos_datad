@@ -43,6 +43,8 @@ enum Cmd {
     Connect(u8),
     /// The modem names this instance for a route lookup of this IP family (4 or 6).
     Names(u8, u8),
+    /// The modem names this technology for a route lookup of this IP family.
+    Technology(u8, u16),
 }
 
 struct Daemon {
@@ -75,6 +77,10 @@ impl Daemon {
 
     fn names(&self, family: u8, instance: u8) {
         self.tell(Cmd::Names(family, instance));
+    }
+
+    fn technology(&self, family: u8, tech: u16) {
+        self.tell(Cmd::Technology(family, tech));
     }
 
     fn kill(mut self) {
@@ -115,6 +121,13 @@ fn spawn_daemon(fd: OwnedFd) -> Daemon {
                     Cmd::Names(family, instance) => {
                         let tlvs = vec![(0x10, vec![instance])];
                         server.engine().qmi_mut().route_answers.insert(family, tlvs);
+                    }
+                    Cmd::Technology(family, tech) => {
+                        let mut block = vec![0u8; 8];
+                        block.extend(tech.to_le_bytes());
+                        let q = server.engine().qmi_mut();
+                        q.route_no_block = true;
+                        q.route_answers.insert(family, vec![(0x01, block)]);
                     }
                 }
             }
@@ -989,6 +1002,32 @@ fn the_other_values_of_the_modules_request_reach_the_modem_in_a_matching_call() 
     assert_eq!(tlv(0x34), Some(vec![2, 1]));
     assert_eq!(tlv(0x3c), Some(vec![1]));
     assert_eq!(tlv(0x3d), Some(vec![2]));
+    release_handle(h as *mut c_void);
+    daemon.kill();
+}
+
+#[test]
+fn a_route_lookup_with_a_preference_asks_the_modem_and_writes_the_wifi_technology() {
+    let _g = exclusive();
+    stock();
+    let (daemon, h) = connect(true);
+    daemon.technology(4, 0x8021);
+    let mut req = route_request(4, "ims.example");
+    let mask = l::rd_u64(&req, request::MASK).unwrap() | request::MASK_XT_TECH_PREF;
+    assert!(l::wr_u64(&mut req, request::MASK, mask));
+    assert!(l::wr_u32(&mut req, request::XT_TECH_PREF, 0x0102));
+    let mut out = out_buf();
+    let rc = abi::dsiNicmRouteLookup(h, 0, out.as_mut_ptr() as usize, req.as_ptr() as usize, 5);
+    assert_eq!(rc, 0);
+    assert_eq!(l::rd_u32(&out, route_out::TECH), Some(0x8021));
+    let frames = daemon.asked.lock().unwrap().clone();
+    let frame = frames.first().unwrap();
+    assert!(frame.windows(5).any(|w| w == [0x34, 2, 0, 2, 1]));
+    // without a preference the modem is not asked and the fixed value stands
+    let (rc, out) = lookup_for(h, 0, 4, "other.example", 5);
+    assert_eq!(rc, 0);
+    assert_eq!(l::rd_u32(&out, route_out::TECH), Some(l::TECH_DEFAULT));
+    assert_eq!(daemon.asked.lock().unwrap().len(), frames.len());
     release_handle(h as *mut c_void);
     daemon.kill();
 }
