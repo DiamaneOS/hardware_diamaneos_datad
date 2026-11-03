@@ -15,7 +15,7 @@ exist, the policy is not added and the product does not change.
   is not the pinned file (`datad-pins.mk`), or when the vendor tree still has a stock nicm file, and adds the packages.
   `test-datad-product.sh` runs it on made-up trees.
 - `datad-pins.mk`: SHA-256 of `libdsi_netctrl.so`, `libqdi.so` and `libqcrilDataModule.so` of the stock release the layouts
-  were read from (FP6.QREL.16.111.0). A stock update changes at least one of them and the build stops until the layouts
+  were read from (FP6.QREL.16.111.0, the same bytes ship in 16.115.0). A stock update that changes one of them stops the build until the layouts
   in `crates/nicm-abi` and `crates/libnicm-dsi/src/layout.rs` are checked against the new files and the pins are changed on purpose.
 - `datad.rc`: init service of the data daemon (replaces `nicmd.rc`), with no supplementary group. It keeps the three performance
   module triggers of `nicmd.rc` word for word and says who sets their properties.

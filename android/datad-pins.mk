@@ -3,7 +3,7 @@
 #
 # The closed peers the open libraries and the daemon were written against, as path:SHA-256 under the
 # vendor tree (vendor/fairphone/FP6/files). The layouts in crates/nicm-abi and crates/libnicm-dsi were read from these
-# files (generation 16.111.0). A different file is a different closed side: the build stops until
+# files (generation 16.111.0, the same bytes ship in 16.115.0). A different file is a different closed side: the build stops until
 # the layouts are checked again and the pin is changed on purpose. The pin check reads this
 # file too.
 DATAD_PINS := \
