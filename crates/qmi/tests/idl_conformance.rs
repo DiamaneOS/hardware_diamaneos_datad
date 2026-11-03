@@ -6,9 +6,11 @@
 //! byte orders, which stay with libqmi's public definitions.
 mod idl;
 
+use dataos_qmi::dfs::{self, PortAnswer, PortKind};
 use dataos_qmi::frame::{HEADER_LEN, MAX_DATAGRAM};
+use dataos_qmi::reverse;
 use dataos_qmi::wds::{self, id, IpFamily};
-use dataos_qmi::{dpm, wda, Frame};
+use dataos_qmi::{dpm, wda, Builder, Frame};
 use idl::{Kind, Spec};
 
 fn frame(bytes: &[u8]) -> Frame<'_> {
@@ -28,6 +30,7 @@ fn the_service_ids_are_the_ones_of_the_service_objects() {
     assert_eq!(spec.services["wds"], wds::SERVICE);
     assert_eq!(spec.services["wda"], wda::SERVICE);
     assert_eq!(spec.services["dpm"], dpm::SERVICE);
+    assert_eq!(spec.services["dfs"], dfs::SERVICE);
 }
 
 #[test]
@@ -293,4 +296,173 @@ fn the_limits_are_the_stock_maximums() {
     assert!(wds::limits::MAX_ADDRS <= list(0x23));
     assert!(wds::limits::MAX_NAMES <= list(0x24));
     assert!(wds::limits::MAX_NAMES <= list(0x2a));
+}
+
+fn big_frame(bytes: &[u8]) -> Frame<'_> {
+    Frame::parse_bounded(bytes, dfs::MAX_MESSAGE).unwrap()
+}
+
+#[test]
+fn the_reverse_transport_requests_fit_the_tables() {
+    let spec = Spec::load();
+    for family in [IpFamily::V4, IpFamily::V6] {
+        fits(
+            &spec,
+            "wds",
+            &reverse::bind_client(1, family, (wds::EP_EMBEDDED, 1), 18).unwrap(),
+        );
+    }
+    fits(
+        &spec,
+        "wds",
+        &reverse::bind_mux_reverse(1, (wds::EP_EMBEDDED, 1), 18).unwrap(),
+    );
+    fits(&spec, "wds", &reverse::register(1).unwrap());
+    fits(&spec, "wds", &reverse::reverse_answer(1, true, 9).unwrap());
+    fits(&spec, "wds", &reverse::ipsec_sa_request(1).unwrap());
+}
+
+#[test]
+fn a_reverse_indication_with_everything_in_it_reads() {
+    let spec = Spec::load();
+    for all in [true, false] {
+        let b = spec.build("wds", Kind::Indication, reverse::id::REVERSE_IND, all, 1);
+        fits(&spec, "wds", &b);
+        let r = reverse::parse_reverse_ind(&frame(&b)).unwrap();
+        assert_eq!((r.status, r.tid), (1, 1));
+        assert_eq!(r.tech.is_some(), all);
+    }
+}
+
+#[test]
+fn an_sa_indication_at_its_largest_fits_the_table_and_the_bound_and_reads() {
+    let spec = Spec::load();
+    let tunnel = |a: [u8; 16]| {
+        let mut v = 6u32.to_le_bytes().to_vec();
+        v.push(16);
+        v.extend(a);
+        v
+    };
+    let mut crypt = vec![128u8];
+    crypt.extend([5u8; 128]);
+    let mut auth = 1024u16.to_le_bytes().to_vec();
+    auth.extend([6u8; 1024]);
+    let b = Builder::indication(reverse::id::IPSEC_SA)
+        .tlv(0x01, &[1, 0, 1, 0])
+        .unwrap()
+        .u32(0x10, 2)
+        .unwrap()
+        .u32(0x11, 3)
+        .unwrap()
+        .u32(0x12, 3)
+        .unwrap()
+        .u32(0x13, 1)
+        .unwrap()
+        .tlv(0x14, &tunnel([1; 16]))
+        .unwrap()
+        .tlv(0x15, &tunnel([2; 16]))
+        .unwrap()
+        .u32(0x16, 6)
+        .unwrap()
+        .u32(0x17, 12)
+        .unwrap()
+        .tlv(0x18, &crypt)
+        .unwrap()
+        .tlv(0x19, &crypt)
+        .unwrap()
+        .u8(0x1b, 1)
+        .unwrap()
+        .u32(0x35, 1)
+        .unwrap()
+        .tlv(0x36, &[0x11, 0x94])
+        .unwrap()
+        .tlv(0x37, &auth)
+        .unwrap()
+        .tlv(0x38, &auth)
+        .unwrap()
+        .build()
+        .unwrap();
+    fits(&spec, "wds", &b);
+    let s = reverse::parse_sa_segment(&frame(&b)).unwrap();
+    assert_eq!(s.fields.rx_auth.unwrap().len(), 1024);
+    assert_eq!(s.fields.tx_crypt.unwrap().len(), 128);
+    // the table's largest indication, every TLV at its maximum, also fits one datagram
+    const { assert!(3697 + HEADER_LEN <= MAX_DATAGRAM) };
+}
+
+#[test]
+fn the_dfs_requests_fit_the_tables() {
+    let spec = Spec::load();
+    fits(&spec, "dfs", &dfs::bind_client(1, 4, (4, 1), 1).unwrap());
+    fits(&spec, "dfs", &dfs::register_link(1).unwrap());
+    fits(&spec, "dfs", &dfs::register_ports(1).unwrap());
+    fits(&spec, "dfs", &dfs::get_filters(1).unwrap());
+    let one = PortAnswer {
+        status: 0,
+        kind: PortKind::V6Udp,
+        port: 5060,
+        chosen: false,
+    };
+    let b = dfs::ports_answer(1, &[one; dfs::MAX_PORT_ANSWERS], Some(3)).unwrap();
+    fits(&spec, "dfs", &b);
+    assert!(b.len() <= MAX_DATAGRAM);
+}
+
+/// A message past the bound of the builder, whose largest datagram is what the daemon sends: header and TLVs by hand.
+fn raw_frame(kind: u8, mid: u16, tlvs: &[(u8, Vec<u8>)]) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (tag, v) in tlvs {
+        body.push(*tag);
+        body.extend((v.len() as u16).to_le_bytes());
+        body.extend(v);
+    }
+    let mut out = vec![kind, 1, 0];
+    out.extend(mid.to_le_bytes());
+    out.extend((body.len() as u16).to_le_bytes());
+    out.extend(body);
+    out
+}
+
+#[test]
+fn the_dfs_indications_read_and_a_full_filter_list_is_the_largest_message() {
+    let spec = Spec::load();
+    let tlv = |id: u16, kind: Kind, tag: u8| {
+        spec.message("dfs", kind, id)
+            .iter()
+            .find(|t| t.tag == tag)
+            .unwrap()
+            .ty
+            .sample(true, true)
+    };
+    let list = tlv(dfs::id::GET_FILTERS, Kind::Response, 0x10);
+    let b = raw_frame(
+        2,
+        dfs::id::GET_FILTERS,
+        &[(0x02, vec![0, 0, 0, 0]), (0x10, list.clone())],
+    );
+    assert_eq!(b.len(), dfs::MAX_MESSAGE);
+    assert!(spec.check_frame("dfs", &big_frame(&b)).is_ok());
+    assert_eq!(dfs::parse_get_filters(&big_frame(&b)), Ok(Vec::new()));
+    let b = raw_frame(
+        4,
+        dfs::id::FILTERS_CHANGED,
+        &[(0x01, vec![1, 0, 0, 0]), (0x10, list)],
+    );
+    assert_eq!(b.len(), dfs::MAX_MESSAGE);
+    assert!(spec.check_frame("dfs", &big_frame(&b)).is_ok());
+    assert_eq!(
+        dfs::parse_filters_changed(&big_frame(&b)),
+        Ok((1, Vec::new()))
+    );
+    let b = spec.build("dfs", Kind::Indication, dfs::id::PORTS_WANTED, true, 1);
+    fits(&spec, "dfs", &b);
+    let p = dfs::parse_ports_wanted(&frame(&b)).unwrap();
+    assert_eq!(p.wishes.len(), 255);
+    assert_eq!(p.range, Some((1, 1, 1)));
+    let b = spec.build("dfs", Kind::Indication, dfs::id::PORTS_RELEASED, true, 1);
+    fits(&spec, "dfs", &b);
+    assert_eq!(dfs::parse_ports_released(&frame(&b)).unwrap().len(), 255);
+    let b = spec.build("dfs", Kind::Indication, dfs::id::ENCAP_PORT, true, 1);
+    fits(&spec, "dfs", &b);
+    assert_eq!(dfs::parse_encap_port(&frame(&b)), Ok((1, 1)));
 }

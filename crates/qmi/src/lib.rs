@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
 //! Bounded QMI service framing over QRTR and the data-path messages
-//! (WDS, WDA, DPM). No sockets and no Android dependencies.
+//! (WDS with its reverse transport, DFS, WDA, DPM). No sockets and no Android dependencies.
 //!
 //! Wire facts come from public sources only: the Linux QRTR UAPI, the field
 //! layouts that libqmi publishes as data, and the DCM codec in
@@ -20,8 +20,11 @@
         clippy::indexing_slicing
     )
 )]
+pub mod dfs;
 pub mod dpm;
 pub mod frame;
+pub mod reverse;
+pub mod secret;
 pub mod wda;
 pub mod wds;
 
