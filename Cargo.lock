@@ -91,6 +91,17 @@ name = "dataos-wire"
 version = "0.1.0"
 
 [[package]]
+name = "dataos-wlan-tunnel"
+version = "0.1.0"
+dependencies = [
+ "dataos-datacore",
+ "dataos-datad",
+ "dataos-netcfg",
+ "dataos-qmi",
+ "dataos-wlan-tunnel",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.174"
 source = "registry+https://github.com/rust-lang/crates.io-index"

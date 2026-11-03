@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//
+// Runs in the Wi-Fi tunnel daemon, so a panic ends wlantunneld and init starts it again. The three lint
+// properties switch the lint wall of lib.rs on in the platform build, see crates/wire/Android.bp.
+rust_library {
+    name: "libdataos_wlan_tunnel",
+    defaults: ["diamaneos_datad_defaults"],
+    vendor: true,
+    crate_name: "dataos_wlan_tunnel",
+    srcs: ["src/lib.rs"],
+    edition: "2021",
+    rustlibs: ["libdataos_qmi", "libdataos_netcfg", "libdataos_datacore", "libdataos_datad"],
+    clippy_lints: "android",
+    lints: "vendor",
+    cargo_env_compat: true,
+}
