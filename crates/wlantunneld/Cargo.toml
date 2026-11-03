@@ -1,0 +1,19 @@
+[package]
+name = "dataos-wlantunneld"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The sockets and the process setup of the Wi-Fi tunnel daemon. The logic is in dataos-wlan-tunnel.
+[[bin]]
+name = "wlantunneld"
+path = "src/main.rs"
+
+[dependencies]
+dataos-wlan-tunnel = { path = "../wlan-tunnel" }
+dataos-datad = { path = "../datad" }
+dataos-datad-rt = { path = "../datad-rt" }
+dataos-netcfg = { path = "../netcfg" }
+dataos-qmi = { path = "../qmi" }
+libc = "=0.2.174"

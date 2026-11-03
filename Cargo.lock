@@ -102,6 +102,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dataos-wlantunneld"
+version = "0.1.0"
+dependencies = [
+ "dataos-datad",
+ "dataos-datad-rt",
+ "dataos-netcfg",
+ "dataos-qmi",
+ "dataos-wlan-tunnel",
+ "libc",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.174"
 source = "registry+https://github.com/rust-lang/crates.io-index"

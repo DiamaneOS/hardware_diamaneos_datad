@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/qmi", "crates/netcfg", "crates/datacore", "crates/wire", "crates/datad", "crates/datad-rt", "crates/nicm-compat", "crates/nicm-abi", "crates/libnicm", "crates/libnicm-dsi", "crates/wlan-tunnel"]
+members = ["crates/qmi", "crates/netcfg", "crates/datacore", "crates/wire", "crates/datad", "crates/datad-rt", "crates/nicm-compat", "crates/nicm-abi", "crates/libnicm", "crates/libnicm-dsi", "crates/wlan-tunnel", "crates/wlantunneld"]
 resolver = "2"
 
 [workspace.package]

@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//
+// The Wi-Fi tunnel daemon: its netlink and UDP sockets, its syscall table and main. The logic is in
+// crates/wlan-tunnel and the runtime of the data daemon is reused. The init rc is installed with the binary
+// through required:. The three lint properties switch the lint wall on in the platform build, see
+// crates/wire/Android.bp.
+rust_binary {
+    name: "wlantunneld",
+    defaults: ["diamaneos_datad_defaults"],
+    vendor: true,
+    crate_name: "wlantunneld",
+    srcs: ["src/main.rs"],
+    edition: "2021",
+    rustlibs: [
+        "libdataos_wlan_tunnel",
+        "libdataos_datad",
+        "libdataos_datad_rt",
+        "libdataos_netcfg",
+        "libdataos_qmi",
+        "liblibc",
+    ],
+    required: ["wlantunneld.rc"],
+    shared_libs: ["liblog"],
+    // One binary with its libraries in it.
+    prefer_rlib: true,
+    clippy_lints: "android",
+    lints: "vendor",
+    cargo_env_compat: true,
+}
