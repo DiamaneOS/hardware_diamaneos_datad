@@ -256,7 +256,7 @@ fn filter_entry(version: u8, spi: u32) -> Vec<u8> {
     e[0] = version;
     e[75..79].copy_from_slice(&0x32u32.to_le_bytes());
     e[121] = 1;
-    e[129..133].copy_from_slice(&spi.to_le_bytes());
+    e[129..133].copy_from_slice(&spi.to_be_bytes());
     e
 }
 
@@ -1597,4 +1597,32 @@ fn local_breakout_is_taken_as_soon_as_the_client_is_registered() {
     assert_eq!(r.answers(), vec![(1, 1)]);
     r.connect(18, 6, tech::IWLAN_S2B, 2, INNER6);
     assert_eq!(r.answers().last(), Some(&(0, 2)));
+}
+
+/// The module compares the tuple with the SPI field of the packet, so the bytes of the modem must reach it unchanged.
+#[test]
+fn an_esp_filter_reaches_the_module_in_the_byte_order_of_the_packet() {
+    let mut r = Rig::up();
+    r.queue_sa(false);
+    r.connect(LINK2_MUX, 6, tech::IWLAN_S2B, 1, INNER6);
+    let mut entry = vec![0u8; 145];
+    entry[0] = 6;
+    entry[75..79].copy_from_slice(&0x32u32.to_le_bytes());
+    entry[121] = 1;
+    entry[129..133].copy_from_slice(&[0xc1, 0xc2, 0xc3, 0xc4]);
+    let mut list = vec![1u8];
+    list.extend(entry);
+    let c = r.modem().dfs_client(LINK2_MUX, 6).unwrap();
+    let changed = Builder::indication(dfs::id::FILTERS_CHANGED)
+        .u32(0x01, 0)
+        .unwrap()
+        .tlv(0x10, &list)
+        .unwrap()
+        .build()
+        .unwrap();
+    r.indicate(c, changed);
+    assert!(r
+        .kernel()
+        .tuples
+        .contains(&[0xc1, 0xc2, 0xc3, 0xc4, 6, 50, 0, 0]));
 }

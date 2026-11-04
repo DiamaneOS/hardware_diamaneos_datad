@@ -138,6 +138,12 @@ fn word_at(entry: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_le_bytes(b.try_into().ok()?))
 }
 
+/// The SPI of a filter. The modem puts it in network order, unlike the other numbers of the message.
+fn spi_at(entry: &[u8], at: usize) -> Option<u32> {
+    let b = entry.get(at..at.checked_add(4)?)?;
+    Some(u32::from_be_bytes(b.try_into().ok()?))
+}
+
 /// The ESP entries of a filter list. Entries of other protocols are left out.
 fn esp_filters(v: &[u8]) -> Result<Vec<EspFilter>, Error> {
     let [count, entries @ ..] = v else {
@@ -150,7 +156,7 @@ fn esp_filters(v: &[u8]) -> Result<Vec<EspFilter>, Error> {
     for e in entries.chunks_exact(FILTER_LEN) {
         let valid = word_at(e, FILTER_IPSEC_VALID_AT).ok_or(Error::Length)? & 1 != 0;
         let proto = word_at(e, FILTER_PROTO_AT).ok_or(Error::Length)?;
-        let spi = word_at(e, FILTER_SPI_AT).ok_or(Error::Length)?;
+        let spi = spi_at(e, FILTER_SPI_AT).ok_or(Error::Length)?;
         match e.first() {
             Some(&version @ (4 | 6)) if proto == PROTO_ESP && valid => {
                 out.push(EspFilter { version, spi });
@@ -351,7 +357,7 @@ mod tests {
         e[0] = version;
         e[FILTER_PROTO_AT..FILTER_PROTO_AT + 4].copy_from_slice(&proto.to_le_bytes());
         e[FILTER_IPSEC_VALID_AT..FILTER_IPSEC_VALID_AT + 8].copy_from_slice(&valid.to_le_bytes());
-        e[FILTER_SPI_AT..FILTER_SPI_AT + 4].copy_from_slice(&spi.to_le_bytes());
+        e[FILTER_SPI_AT..FILTER_SPI_AT + 4].copy_from_slice(&spi.to_be_bytes());
         e
     }
 
