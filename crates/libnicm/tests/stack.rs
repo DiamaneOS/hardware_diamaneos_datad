@@ -56,6 +56,8 @@ impl Drop for Exclusive {
 fn exclusive() -> Exclusive {
     let g = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
     reset_for_tests();
+    // A failed test must not leave the next one unable to wait on its connection.
+    fail_descriptor_copies_for_tests(false);
     EVENTS.lock().unwrap().clear();
     CALLBACK_ASKED.lock().unwrap().clear();
     BAD_USER.lock().unwrap().clear();
@@ -450,7 +452,8 @@ fn settled_descriptors() -> usize {
 
 /// A connection that is given up is closed at once: its descriptor is released, and not held until the next
 /// connection replaces it, which a daemon on Linux would meet as a connection that never ends. Of the two
-/// descriptors fewer afterwards, one is the copy the reader waited on and one is the connection.
+/// descriptors fewer afterwards, one is the copy the reader waited on and one is the connection. On Linux the
+/// test's own daemon then sees the close and ends, and its descriptors go as well.
 #[test]
 fn a_connection_that_is_given_up_is_closed_and_not_held_until_the_next_one() {
     let _g = exclusive();
@@ -470,7 +473,7 @@ fn a_connection_that_is_given_up_is_closed_and_not_held_until_the_next_one() {
     wait_for("the restart notice", || {
         events_of(event::RESTART_START) >= 1
     });
-    assert_eq!(settled_descriptors() + 2, before);
+    assert!(settled_descriptors() + 2 <= before);
     fail_descriptor_copies_for_tests(false);
     release_handle(h);
     first.kill();
