@@ -42,6 +42,8 @@ const TRANSPORT_PREFIX: &str = "wlan";
 const INNER_ADDRESS_PREFIX: &str = "rmnet_data";
 /// Failed deletions kept for a retry. With what the links can hold, this fits the state file.
 const MAX_LEFT: usize = 20;
+/// Ports of one request named in the log. They say nothing about the user.
+const MAX_PORTS_SAID: usize = 8;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -1047,7 +1049,13 @@ impl<Q: Qmi, K: Kernel> Engine<Q, K> {
                 "the inner address is not a usable unicast address",
             );
         }
-        if self.legs[i].step != Step::Ready {
+        // the indication proves the registration, and local breakout does not use the DFS client
+        let ready = match self.legs[i].step {
+            Step::Ready => true,
+            Step::Register | Step::DfsBind | Step::DfsRegister => t == tech::LOCAL_BREAKOUT,
+            _ => false,
+        };
+        if !ready {
             return self.refuse(i, ind.tid, "the client is not ready");
         }
         self.fail_pending(i, "a new connect came first");
@@ -1693,7 +1701,16 @@ impl<Q: Qmi, K: Kernel> Engine<Q, K> {
         }
         let taken = match (port, range) {
             (0, Some((_, min, max))) => self.pick_in_range(kind, min, max),
-            _ => self.kernel.reserve_port(kind, port).ok(),
+            _ => match self.kernel.reserve_port(kind, port) {
+                Ok(found) => Some(found),
+                Err(e) => {
+                    self.say(format!(
+                        "ports: port {port} {kind:?}: bind failed, errno {}",
+                        e.errno()
+                    ));
+                    None
+                }
+            },
         };
         let (sock, got) = taken?;
         self.store.put(got, kind, Some(sock));
@@ -1725,39 +1742,46 @@ impl<Q: Qmi, K: Kernel> Engine<Q, K> {
             .is_some_and(|(prop, _, _)| prop == PROPERTY_SYMMETRIC);
         let mut answers = Vec::new();
         let mut new_ports = Vec::new();
-        for wish in &p.wishes {
+        // the answer ends at the first port that cannot be had, with no entry for it and no status
+        let mut failed = bad_range;
+        'wishes: for wish in p.wishes.iter().filter(|_| !bad_range) {
             let mut same_port = 0u16;
             for kind in kinds_of(wish.ip, wish.proto) {
                 if answers.len() >= dfs::MAX_PORT_ANSWERS {
-                    break;
+                    break 'wishes;
                 }
                 let ask = if wish.port != 0 { wish.port } else { same_port };
-                let got = if bad_range {
-                    None
-                } else {
-                    self.reserve(kind, ask, p.range)
+                let Some((port, new)) = self.reserve(kind, ask, p.range) else {
+                    failed = true;
+                    break 'wishes;
                 };
-                let port = got.map_or(ask, |(n, _)| n);
-                if let Some((n, true)) = got {
-                    new_ports.push((n, kind));
+                if new {
+                    new_ports.push((port, kind));
                 }
-                if symmetric && wish.port == 0 && got.is_some() {
+                if symmetric && wish.port == 0 {
                     same_port = port;
                 }
                 answers.push(PortAnswer {
-                    status: u32::from(got.is_none()),
+                    status: 0,
                     kind,
                     port,
                     chosen: wish.port == 0,
                 });
             }
         }
-        let failed = answers.iter().filter(|a| a.status != 0).count();
+        let asked: Vec<u16> = p
+            .wishes
+            .iter()
+            .map(|w| w.port)
+            .filter(|n| *n != 0)
+            .take(MAX_PORTS_SAID)
+            .collect();
         self.say(format!(
-            "ports: 0x32 with {} entries, {} answers, {failed} failed, {} in the store",
+            "ports: 0x32 with {} entries, {} answers, stopped: {failed}, {} in the store, first ports {asked:?}, range {:?}",
             p.wishes.len(),
             answers.len(),
-            self.store.len()
+            self.store.len(),
+            p.range
         ));
         if !new_ports.is_empty() {
             let tuples = new_ports.iter().map(|(n, k)| tuple_of(*n, *k)).collect();

@@ -998,7 +998,7 @@ fn the_port_requests_of_the_modem_are_held_answered_and_released() {
 }
 
 #[test]
-fn a_range_is_kept_a_symmetric_pick_is_one_port_and_a_failed_port_has_a_status() {
+fn a_range_is_kept_a_symmetric_pick_is_one_port_and_a_failed_port_ends_the_answer() {
     let mut r = Rig::up();
     let c = r.modem().dfs_client(1, 4).unwrap();
     let mut range = dfs::PROPERTY_SYMMETRIC.to_le_bytes().to_vec();
@@ -1022,7 +1022,7 @@ fn a_range_is_kept_a_symmetric_pick_is_one_port_and_a_failed_port_has_a_status()
     assert_eq!(a, b);
     assert!((45000..=45009).contains(&a));
 
-    // every port of a range busy: the tries end and the status says so
+    // every port of a range busy: the tries end and the answer has no entry
     let mut r = Rig::up();
     let c = r.modem().dfs_client(1, 4).unwrap();
     r.kernel_mut().busy_ports = (46000..=46001).collect();
@@ -1041,10 +1041,10 @@ fn a_range_is_kept_a_symmetric_pick_is_one_port_and_a_failed_port_has_a_status()
         .1
         .clone();
     let f = Frame::parse(&answer).unwrap();
-    assert_eq!(&f.tlv(0x01).unwrap()[1..5], &[1, 0, 0, 0]);
+    assert_eq!(f.tlv(0x01).unwrap(), &[0]);
     assert_eq!(r.e.ports_in_store(), 8);
 
-    // a range that is no range fails every entry
+    // a range that is no range gives an answer with no entry
     let mut r = Rig::up();
     let c = r.modem().dfs_client(1, 4).unwrap();
     let mut range = 0u32.to_le_bytes().to_vec();
@@ -1062,7 +1062,7 @@ fn a_range_is_kept_a_symmetric_pick_is_one_port_and_a_failed_port_has_a_status()
         .1
         .clone();
     let f = Frame::parse(&answer).unwrap();
-    assert_eq!(&f.tlv(0x01).unwrap()[1..5], &[1, 0, 0, 0]);
+    assert_eq!(f.tlv(0x01).unwrap(), &[0]);
 }
 
 #[test]
@@ -1550,4 +1550,51 @@ fn the_links_of_the_data_daemon_never_take_a_mux_of_the_reverse_links() {
     assert_eq!(data.reserve_links, 2);
     assert_eq!(ours.links, 4);
     assert!(data.link_count <= 17);
+}
+
+#[test]
+fn the_answer_of_a_port_request_ends_at_the_first_port_that_cannot_be_had() {
+    let mut r = Rig::up();
+    let c = r.modem().dfs_client(1, 4).unwrap();
+    r.kernel_mut().busy_ports = vec![500];
+    let mut entries = vec![3u8];
+    for port in [40000u16, 500, 40001] {
+        entries.extend([4u8, 17, 0, 0, 0]);
+        entries.extend(port.to_le_bytes());
+    }
+    let wanted = Builder::indication(dfs::id::PORTS_WANTED)
+        .tlv(0x01, &entries)
+        .unwrap()
+        .build()
+        .unwrap();
+    r.indicate(c, wanted);
+    let answer = r.m.0.borrow().sent_of(dfs::SERVICE, dfs::id::PORTS_ANSWER)[0]
+        .1
+        .clone();
+    let f = Frame::parse(&answer).unwrap();
+    let v = f.tlv(0x01).unwrap();
+    assert_eq!((v[0], &v[1..5]), (1, &[0u8, 0, 0, 0][..]));
+    assert_eq!(r.e.ports_in_store(), 9);
+    let said = r
+        .lines
+        .iter()
+        .any(|l| l.contains("port 500") && l.contains("bind failed"));
+    assert!(said);
+    assert!(r
+        .lines
+        .iter()
+        .any(|l| l.contains("first ports [40000, 500, 40001]")));
+}
+
+#[test]
+fn local_breakout_is_taken_as_soon_as_the_client_is_registered() {
+    let mut r = Rig::new();
+    r.e.start(r.now);
+    // the answers of the DFS client stay away, so the client stops short of ready
+    r.modem().silent.push((dfs::SERVICE, dfs::id::BIND_CLIENT));
+    r.modem_up();
+    r.connect(18, 4, tech::LOCAL_BREAKOUT, 1, WIFI4);
+    assert_eq!(r.answers(), vec![(1, 1)]);
+    r.connect(18, 6, tech::IWLAN_S2B, 2, INNER6);
+    assert_eq!(r.answers().last(), Some(&(0, 2)));
 }
