@@ -278,7 +278,11 @@ pub fn parse_ack(buf: &[u8], seq: u32) -> Option<Ack> {
         return None;
     }
     let err = i32::from_ne_bytes(buf[16..20].try_into().ok()?);
-    Some(if err == 0 { Ack::Ok } else { Ack::Errno(-err) })
+    Some(if err == 0 {
+        Ack::Ok
+    } else {
+        Ack::Errno(err.saturating_neg())
+    })
 }
 
 pub fn padded(n: usize) -> usize {
@@ -474,5 +478,17 @@ mod tests {
         ok[16..20].copy_from_slice(&(-17i32).to_ne_bytes());
         assert_eq!(parse_ack(&ok, 7), Some(Ack::Errno(17)));
         assert_eq!(parse_ack(&ok[..10], 7), None);
+    }
+
+    /// An error word the kernel never writes, found by the fuzz target `netlink_replies`: its negation overflows.
+    #[test]
+    fn the_lowest_error_word_is_read_without_overflow() {
+        let mut ack = vec![0u8; 20];
+        ack[0..4].copy_from_slice(&20u32.to_ne_bytes());
+        ack[4..6].copy_from_slice(&NLMSG_ERROR.to_ne_bytes());
+        ack[8..12].copy_from_slice(&7u32.to_ne_bytes());
+        ack[16..20].copy_from_slice(&i32::MIN.to_ne_bytes());
+        assert_eq!(parse_ack(&ack, 7), Some(Ack::Errno(i32::MAX)));
+        assert_eq!(crate::genl::parse_family(&ack, 7), Some(Err(i32::MAX)));
     }
 }
