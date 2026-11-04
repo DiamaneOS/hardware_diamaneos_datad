@@ -44,6 +44,7 @@ in a type that cannot be printed, and are zeroed with every buffer that held the
 | `crates/libnicm-dsi` | The replacement for `libnicm_dsi.so`: the exports the closed data module calls, with the stock prototypes and layouts |
 | `crates/qmi/tests/idl/idl-expected.txt` | The message layouts the code builds or parses, as the IDL tables of the stock `libqmiservices.so` give them |
 | `android/` | The Soong modules (next to the crates), the init rc, the SELinux policy, the vendor UID, the device switch, the pins of the closed peers and the list of stock files that leave the vendor image. See `android/README.md` |
+| `fuzz/` | cargo-fuzz targets for the parsers of what the modem and the kernel send, see Fuzzing below |
 
 `wire`, `nicm-compat`, `nicm-abi`, `libnicm` and `libnicm-dsi` run inside `qcrilNrd`, the process that carries
 voice and emergency calls, and the Android build compiles Rust with `panic=abort`. They forbid `unwrap`, `expect`,
@@ -67,6 +68,21 @@ of `crates/nicm-abi` that says the stock layouts are checked, and a device build
 The daemon needs Linux 6.9 or later (it identifies a peer process by the inode of its pidfd, which is the
 process's own only from 6.9) and stops at start on an older kernel. It runs as the vendor user `vendor_datad`
 with `NET_ADMIN` only, behind a syscall filter and its own SELinux domain.
+
+### Fuzzing
+
+`fuzz/` holds cargo-fuzz targets for every parser of what the modem and the kernel send: QMI framing and messages,
+QRTR control packets and the transport, netlink replies, ioctl answers, the segments of `0x11c` and the ESP
+states of `sa.rs`, and the two engines against a modem that says anything. It is a workspace of its own and needs
+nightly Rust:
+
+```
+cd fuzz
+cargo +nightly fuzz list
+cargo +nightly fuzz run qmi_messages -- -max_total_time=600
+```
+
+A crash found there gets a test in the crate it was found in, so `cargo test` keeps it fixed.
 
 ## Selecting it in a device build
 

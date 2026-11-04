@@ -1,0 +1,92 @@
+[package]
+name = "dataos-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# A workspace of its own: the fuzz targets need nightly and libFuzzer, and the crates of the daemon do not.
+[workspace]
+members = ["."]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+libfuzzer-sys = "0.4"
+dataos-qmi = { path = "../crates/qmi" }
+dataos-netcfg = { path = "../crates/netcfg", features = ["fake"] }
+dataos-datacore = { path = "../crates/datacore", features = ["sim"] }
+dataos-datad = { path = "../crates/datad", features = ["fake"] }
+dataos-wlan-tunnel = { path = "../crates/wlan-tunnel", features = ["fake"] }
+
+# As the daemon is built: arithmetic that overflows stops the run.
+[profile.release]
+debug = 1
+overflow-checks = true
+
+[[bin]]
+name = "qmi_frame"
+path = "fuzz_targets/qmi_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qmi_messages"
+path = "fuzz_targets/qmi_messages.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qrtr_control"
+path = "fuzz_targets/qrtr_control.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "netlink_replies"
+path = "fuzz_targets/netlink_replies.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ioctl_answers"
+path = "fuzz_targets/ioctl_answers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sa_reassembly"
+path = "fuzz_targets/sa_reassembly.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "esp_state"
+path = "fuzz_targets/esp_state.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tunnel_engine"
+path = "fuzz_targets/tunnel_engine.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "datacore_engine"
+path = "fuzz_targets/datacore_engine.rs"
+test = false
+doc = false
+bench = false
