@@ -38,6 +38,9 @@ dontaudit diamaneos_wlantunnel kernel:system module_request;
 # never listen. Android has no port labels (port_contexts is empty), so every port is `port`.
 allow diamaneos_wlantunnel self:udp_socket { create setopt bind getattr connect };
 allow diamaneos_wlantunnel self:tcp_socket { create setopt bind getattr };
+# connect in bionic goes through libnetd_client, which asks for SO_DOMAIN to see if it should mark the socket. Without
+# this the socket goes unmarked, which is what the tunnel wants: the mark of its packets comes from the ESP state.
+dontaudit diamaneos_wlantunnel self:udp_socket getopt;
 allow diamaneos_wlantunnel node:{ udp_socket tcp_socket } node_bind;
 allow diamaneos_wlantunnel port:{ udp_socket tcp_socket } name_bind;
 
