@@ -9,7 +9,7 @@ use dataos_qmi::dfs::PortKind;
 
 pub const WELL_KNOWN: [u16; 2] = [5060, 7275];
 /// The most ports the store holds. Each is one file descriptor.
-pub const MAX_PORTS: usize = 128;
+pub const MAX_PORTS: usize = 192;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry {

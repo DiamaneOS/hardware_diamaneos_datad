@@ -1049,7 +1049,7 @@ fn a_range_is_kept_a_symmetric_pick_is_one_port_and_a_failed_port_ends_the_answe
     let c = r.modem().dfs_client(1, 4).unwrap();
     let mut range = 0u32.to_le_bytes().to_vec();
     range.extend(9u16.to_le_bytes());
-    range.extend(9u16.to_le_bytes());
+    range.extend(8u16.to_le_bytes());
     let wanted = Builder::indication(dfs::id::PORTS_WANTED)
         .tlv(0x01, &[1, 4, 6, 0, 0, 0, 0x50, 0xc3])
         .unwrap()
@@ -1553,7 +1553,7 @@ fn the_links_of_the_data_daemon_never_take_a_mux_of_the_reverse_links() {
 }
 
 #[test]
-fn the_answer_of_a_port_request_ends_at_the_first_port_that_cannot_be_had() {
+fn a_port_that_cannot_be_had_has_no_answer_and_the_next_ones_still_get_theirs() {
     let mut r = Rig::up();
     let c = r.modem().dfs_client(1, 4).unwrap();
     r.kernel_mut().busy_ports = vec![500];
@@ -1572,18 +1572,117 @@ fn the_answer_of_a_port_request_ends_at_the_first_port_that_cannot_be_had() {
         .1
         .clone();
     let f = Frame::parse(&answer).unwrap();
-    let v = f.tlv(0x01).unwrap();
-    assert_eq!((v[0], &v[1..5]), (1, &[0u8, 0, 0, 0][..]));
-    assert_eq!(r.e.ports_in_store(), 9);
-    let said = r
-        .lines
-        .iter()
-        .any(|l| l.contains("port 500") && l.contains("bind failed"));
-    assert!(said);
+    assert_eq!(f.tlv(0x01).unwrap()[0], 2);
+    assert_eq!(r.e.ports_in_store(), 10);
     assert!(r
         .lines
         .iter()
-        .any(|l| l.contains("first ports [40000, 500, 40001]")));
+        .any(|l| l.contains("port 500") && l.contains("bind failed")));
+    assert!(r
+        .lines
+        .iter()
+        .any(|l| l.contains("3 entries, 2 answers, 1 failed")));
+}
+
+/// The port of each answer of a 0x33, in order.
+fn answered_ports(r: &Rig) -> Vec<(u16, u8, u8)> {
+    let answer = r.m.0.borrow().sent_of(dfs::SERVICE, dfs::id::PORTS_ANSWER)[0]
+        .1
+        .clone();
+    let f = Frame::parse(&answer).unwrap();
+    let v = f.tlv(0x01).unwrap();
+    v[1..]
+        .chunks_exact(16)
+        .map(|e| (u16::from_le_bytes([e[14], e[15]]), e[8], e[9]))
+        .collect()
+}
+
+fn ports_wanted(entries: &[(u8, u8, u16)], property: u32, min: u16, max: u16) -> Vec<u8> {
+    let mut list = vec![u8::try_from(entries.len()).unwrap()];
+    for (ip, proto, port) in entries {
+        list.extend([*ip, *proto, 0, 0, 0]);
+        list.extend(port.to_le_bytes());
+    }
+    let mut range = property.to_le_bytes().to_vec();
+    range.extend(min.to_le_bytes());
+    range.extend(max.to_le_bytes());
+    Builder::indication(dfs::id::PORTS_WANTED)
+        .tlv(0x01, &list)
+        .unwrap()
+        .tlv(0x11, &range)
+        .unwrap()
+        .build()
+        .unwrap()
+}
+
+/// RTP and RTCP: the media range of the modem asks for an even port and the next one, for each wish.
+#[test]
+fn an_adjacent_wish_gets_an_even_port_and_the_next_one() {
+    let mut r = Rig::up();
+    let c = r.modem().dfs_client(1, 4).unwrap();
+    r.indicate(
+        c,
+        ports_wanted(
+            &[(6, 17, 0), (4, 6, 0)],
+            dfs::PROPERTY_ADJACENT,
+            50010,
+            50061,
+        ),
+    );
+    let ports = answered_ports(&r);
+    assert_eq!(ports.len(), 4);
+    for pair in ports.chunks_exact(2) {
+        assert_eq!(pair[0].0 % 2, 0);
+        assert_eq!(pair[1].0, pair[0].0 + 1);
+        assert!((50010..=50061).contains(&pair[0].0) && pair[1].0 <= 50061);
+        // chosen by the AP, and the same family for both
+        assert_eq!((pair[0].1, pair[1].1), (1, 1));
+        assert_eq!(pair[0].2, pair[1].2);
+    }
+    assert_eq!(r.e.ports_in_store(), 8 + 4);
+    let k = r.kernel();
+    let tuple = |p: u16, v: u8, proto: u8| [(p >> 8) as u8, p as u8, 0, 0, v, proto, 0, 0];
+    assert!(k.tuples.contains(&tuple(ports[0].0, 6, 17)));
+    assert!(k.tuples.contains(&tuple(ports[1].0, 6, 17)));
+    assert!(k.tuples.contains(&tuple(ports[2].0, 4, 6)));
+    assert!(k.tuples.contains(&tuple(ports[3].0, 4, 6)));
+}
+
+#[test]
+fn a_busy_half_of_a_pair_gives_the_whole_pair_back_and_an_odd_port_is_refused() {
+    let mut r = Rig::up();
+    let c = r.modem().dfs_client(1, 4).unwrap();
+    // only 50021 is free of the upper halves that matter: the pair with a busy odd port is never kept
+    r.kernel_mut().busy_ports = vec![50011, 50013, 50015];
+    r.indicate(
+        c,
+        ports_wanted(&[(4, 17, 0)], dfs::PROPERTY_ADJACENT, 50010, 50017),
+    );
+    let ports = answered_ports(&r);
+    assert_eq!(
+        ports.iter().map(|p| p.0).collect::<Vec<_>>(),
+        vec![50016, 50017]
+    );
+    assert_eq!(r.e.ports_in_store(), 8 + 2);
+    assert_eq!(r.kernel().sockets.len(), 8 + 2, "no half is left held");
+
+    let mut r = Rig::up();
+    let c = r.modem().dfs_client(1, 4).unwrap();
+    r.indicate(
+        c,
+        ports_wanted(&[(4, 17, 50021)], dfs::PROPERTY_ADJACENT, 50010, 50061),
+    );
+    assert!(answered_ports(&r).is_empty());
+    assert_eq!(r.e.ports_in_store(), 8);
+}
+
+#[test]
+fn a_range_of_zeros_is_the_default_and_a_port_by_number_is_kept() {
+    let mut r = Rig::up();
+    let c = r.modem().dfs_client(1, 4).unwrap();
+    r.indicate(c, ports_wanted(&[(4, 17, 40775)], 0, 0, 0));
+    assert_eq!(answered_ports(&r)[0].0, 40775);
+    assert_eq!(r.e.ports_in_store(), 9);
 }
 
 #[test]

@@ -36,6 +36,8 @@ const PICK_TRIES: u32 = 100;
 const MAX_ENCAP: usize = 8;
 const MAX_LINES: usize = 256;
 const PROPERTY_SYMMETRIC: u32 = dfs::PROPERTY_SYMMETRIC;
+const PROPERTY_ADJACENT: u32 = dfs::PROPERTY_ADJACENT;
+const DEFAULT_RANGE: (u16, u16) = (1025, u16::MAX);
 /// A tunnel runs over Wi-Fi only.
 const TRANSPORT_PREFIX: &str = "wlan";
 /// The only interfaces that may hold the inner address of a tunnel: the forward links of the data daemon.
@@ -1735,25 +1737,137 @@ impl<Q: Qmi, K: Kernel> Engine<Q, K> {
         None
     }
 
+    /// An even port and the next one for each kind, for RTP and RTCP. A wish that cannot have the pair has nothing.
+    fn reserve_pair(
+        &mut self,
+        kinds: &[PortKind],
+        port: u16,
+        (min, max): (u16, u16),
+        got: &mut Vec<(u16, PortKind, bool)>,
+    ) -> bool {
+        let top = max.saturating_sub(1);
+        if port & 1 != 0 || port > top || (port == 0 && min > top) {
+            return false;
+        }
+        let span = u32::from(top)
+            .saturating_sub(u32::from(min))
+            .saturating_add(1);
+        let tries = if port == 0 { PICK_TRIES } else { 1 };
+        for _ in 0..tries {
+            let first = if port != 0 {
+                port
+            } else {
+                let offset = self.kernel.random().checked_rem(span).unwrap_or(0);
+                let picked = u32::from(min).saturating_add(offset);
+                let even = picked.saturating_add(picked % 2);
+                match u16::try_from(even) {
+                    Ok(n) if n <= top => n,
+                    _ => continue,
+                }
+            };
+            let start = got.len();
+            let mut whole = true;
+            'kinds: for kind in kinds {
+                for n in [first, first.saturating_add(1)] {
+                    if self.store.find(n, *kind).is_some() {
+                        // a port asked for by number may be held already, one the daemon picks may not
+                        whole = port != 0;
+                        if !whole {
+                            break 'kinds;
+                        }
+                        got.push((n, *kind, false));
+                        continue;
+                    }
+                    if !self.store.has_room() {
+                        whole = false;
+                        break 'kinds;
+                    }
+                    match self.kernel.reserve_port(*kind, n) {
+                        Ok((sock, _)) => {
+                            self.store.put(n, *kind, Some(sock));
+                            got.push((n, *kind, true));
+                        }
+                        Err(e) => {
+                            self.say(format!(
+                                "ports: port {n} {kind:?}: bind failed, errno {}",
+                                e.errno()
+                            ));
+                            whole = false;
+                            break 'kinds;
+                        }
+                    }
+                }
+            }
+            if whole {
+                return true;
+            }
+            for (n, kind, new) in got.split_off(start) {
+                if new {
+                    if let Some(s) = self.store.remove(n, kind).and_then(|e| e.sock) {
+                        self.kernel.close_socket(s);
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn on_ports_wanted(&mut self, client: ClientId, p: &PortsWanted) {
-        let bad_range = p.range.is_some_and(|(_, min, max)| min >= max);
+        // Only a highest port below the lowest is refused. A bound of 0 means the default.
+        let bad_range = p.range.is_some_and(|(_, min, max)| max != 0 && max < min);
+        let range = p.range.map(|(prop, min, max)| {
+            let (low, high) = match (min, max) {
+                (0, 0) => DEFAULT_RANGE,
+                (0, high) => (DEFAULT_RANGE.0, high),
+                (low, 0) => (low, DEFAULT_RANGE.1),
+                both => both,
+            };
+            (prop, low, high)
+        });
         let symmetric = p
             .range
             .is_some_and(|(prop, _, _)| prop == PROPERTY_SYMMETRIC);
+        let adjacent = p
+            .range
+            .is_some_and(|(prop, _, _)| prop == PROPERTY_ADJACENT);
         let mut answers = Vec::new();
         let mut new_ports = Vec::new();
-        // the answer ends at the first port that cannot be had, with no entry for it and no status
-        let mut failed = bad_range;
+        // A port that cannot be had has no entry and no status, and the next wish still gets its try.
+        let mut failed = usize::from(bad_range);
         'wishes: for wish in p.wishes.iter().filter(|_| !bad_range) {
+            if adjacent {
+                let kinds = kinds_of(wish.ip, wish.proto);
+                let bounds = range.map_or(DEFAULT_RANGE, |(_, low, high)| (low, high));
+                let mut got = Vec::new();
+                if answers.len().saturating_add(kinds.len().saturating_mul(2))
+                    > dfs::MAX_PORT_ANSWERS
+                    || !self.reserve_pair(&kinds, wish.port, bounds, &mut got)
+                {
+                    failed = failed.saturating_add(1);
+                    continue;
+                }
+                for (port, kind, new) in got {
+                    if new {
+                        new_ports.push((port, kind));
+                    }
+                    answers.push(PortAnswer {
+                        status: 0,
+                        kind,
+                        port,
+                        chosen: wish.port == 0,
+                    });
+                }
+                continue;
+            }
             let mut same_port = 0u16;
             for kind in kinds_of(wish.ip, wish.proto) {
                 if answers.len() >= dfs::MAX_PORT_ANSWERS {
                     break 'wishes;
                 }
                 let ask = if wish.port != 0 { wish.port } else { same_port };
-                let Some((port, new)) = self.reserve(kind, ask, p.range) else {
-                    failed = true;
-                    break 'wishes;
+                let Some((port, new)) = self.reserve(kind, ask, range) else {
+                    failed = failed.saturating_add(1);
+                    continue;
                 };
                 if new {
                     new_ports.push((port, kind));
@@ -1777,7 +1891,7 @@ impl<Q: Qmi, K: Kernel> Engine<Q, K> {
             .take(MAX_PORTS_SAID)
             .collect();
         self.say(format!(
-            "ports: 0x32 with {} entries, {} answers, stopped: {failed}, {} in the store, first ports {asked:?}, range {:?}",
+            "ports: 0x32 with {} entries, {} answers, {failed} failed, {} in the store, first ports {asked:?}, range {:?}",
             p.wishes.len(),
             answers.len(),
             self.store.len(),
