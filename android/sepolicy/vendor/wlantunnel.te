@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The DiamaneOS Project
 #
-# The Wi-Fi tunnel daemon domain. Included only when the device builds with DIAMANEOS_DATAD (datad-board.mk).
+# The Wi-Fi tunnel daemon domain. The device includes it through datad-board.mk.
 # Every rule below is exact: a permission is here because the code does the call, and the code is named. What stock
 # nicmd did for Wi-Fi calling with netd and the connectivity service is not done here: no Binder, no use of
 # netutils, no NET_RAW, no write to ip_local_reserved_ports. A port is held by a bound socket instead.

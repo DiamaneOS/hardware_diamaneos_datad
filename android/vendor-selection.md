@@ -27,9 +27,9 @@ in `qcrilNrd`: DSI and QDI, 1,575,040 bytes less than E would remove.
 `nicmd.rc` also loads `rmnet_shs`, `rmnet_perf` and `rmnet_offload` on properties. `datad.rc` keeps those
 triggers as they are, see there for who sets the properties.
 
-How they leave: the project tools take them out (`datad_selection.py` in `diamaneos_tools`, `diamaneos build vendor --datad`
-and `diamaneos vendor product --datad`). They write the pair for a build with `DIAMANEOS_DATAD=true` from the selected-file
-recipe and the ELF selection of the stock data stack. They drop the twelve files from both, turn the two edges of
+How they leave: the project tools take them out (`datad_selection.py` in `diamaneos_tools`, used by `diamaneos build vendor`
+and `diamaneos vendor product`). They make the pair from the selected-file recipe and the ELF selection of the stock
+files. They drop the twelve files from both, turn the two edges of
 `libdsi_netctrl.so` to `libnicm.so` and `libnicm_dsi.so` into edges of kind `source-module`, and stop when the stock files
 are not the ones this list was read from. The renderer accepts a source module only when its reviewed list
 (`SOURCE_MODULE_DEPENDENCIES` in `vendor_product.py`) names it, and it names `libnicm` and `libnicm_dsi`. On the real
@@ -38,13 +38,9 @@ FP6.QREL.16.111.0 files 12 files and 86 edges leave, and the tools render the re
 pulled into the vendor image: it is a source-built interface library, the stock file is never installed, and only the
 dropped `libnicm_modemproxy.so` linked it.
 
-The device build refuses the other combination. With the switch on and a vendor tree that still has one of the twelve
-files, `datad-product.mk` stops with the file names (Kati would otherwise stop on two install rules for
-`vendor/lib64/libnicm.so`). With the switch off nothing changes, and the Soong modules do not exist.
+The device build refuses a vendor tree that still has one of the twelve files: `datad-product.mk` stops with the file
+names (Kati would otherwise stop on two install rules for `vendor/lib64/libnicm.so`).
 
-Device repo, done: the switch (`BoardConfig.mk`, `telephony.mk`) and `qrtr.te` naming `diamaneos_datad` under the
-switch. To go once the open stack has run: `sepolicy/telephony/nicmd.te` and its file contexts go, the `tipc_socket`
-allow and neverallow in `rild.te` go, `init.fp6.telephony.rc` keeps its QCRIL lines. Kernel: `CONFIG_TIPC` off again and
-`tipc.ko` out of system_dlkm. The pin of the closed peers (`libdsi_netctrl.so`, `libqdi.so`, `libqcrilDataModule.so`) is
+The pin of the closed peers (`libdsi_netctrl.so`, `libqdi.so`, `libqcrilDataModule.so`) is
 the hash of the generation 23400 files: a vendor update changes them, and the build fails until the layouts of the open
 libraries are checked against the new files again.

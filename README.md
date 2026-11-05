@@ -43,7 +43,7 @@ in a type that cannot be printed, and are zeroed with every buffer that held the
 | `crates/libnicm` | The replacement for `libnicm.so`: the connection to the daemon |
 | `crates/libnicm-dsi` | The replacement for `libnicm_dsi.so`: the exports the closed data module calls, with the stock prototypes and layouts |
 | `crates/qmi/tests/idl/idl-expected.txt` | The message layouts the code builds or parses, as the IDL tables of the stock `libqmiservices.so` give them |
-| `android/` | The Soong modules (next to the crates), the init rc, the SELinux policy, the vendor UID, the device switch, the pins of the closed peers and the list of stock files that leave the vendor image. See `android/README.md` |
+| `android/` | The Soong modules (next to the crates), the init rc, the SELinux policy, the vendor UID, the pins of the closed peers and the list of stock files that leave the vendor image. See `android/README.md` |
 | `fuzz/` | cargo-fuzz targets for the parsers of what the modem and the kernel send, see Fuzzing below |
 
 `wire`, `nicm-compat`, `nicm-abi`, `libnicm` and `libnicm-dsi` run inside `qcrilNrd`, the process that carries
@@ -86,8 +86,7 @@ A crash found there gets a test in the crate it was found in, so `cargo test` ke
 
 ## Selecting it in a device build
 
-Everything is behind one build switch of the device, `DIAMANEOS_DATAD`, which is true by default and must stay
-true on the FP6, as its policy has no stock nicmd. The device build sets the Soong config that enables the modules, adds the policy directory and the
+The FP6 includes the board and product files of `android/`. The device build sets the Soong config that enables the modules, adds the policy directory and the
 vendor UID, installs `datad` with its init rc, and replaces `libnicm.so` and `libnicm_dsi.so` at the stock paths.
 The product makefile stops the build when one of the closed peers the layouts were read from (`libdsi_netctrl.so`,
 `libqdi.so`, `libqcrilDataModule.so`) is not the pinned file, or when the vendor tree still has a stock nicm file.

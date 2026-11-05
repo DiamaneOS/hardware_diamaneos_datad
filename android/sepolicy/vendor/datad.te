@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The DiamaneOS Project
 #
-# The data daemon domain. It replaces nicmd (the stock domain vendor_nicmd stays defined in the
-# device policy and is simply unused when the stock daemon is left out of the image). Included only
-# when the device builds with DIAMANEOS_DATAD (datad-board.mk). Every rule below is exact: a
+# The data daemon domain. It replaces nicmd, whose domain vendor_nicmd is no longer in the device
+# policy.
+# The device includes it through datad-board.mk. Every rule below is exact: a
 # permission is here because the code does the call, and the code is named. Reduced from the nicmd
 # domain: no TIPC, no TCP, UDP or raw sockets, no node_bind, no netd or system_server Binder, no
 # NET_RAW, no BLOCK_SUSPEND, no XFRM, no QMI priority sockets, no sysfs.

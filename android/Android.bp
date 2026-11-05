@@ -6,8 +6,8 @@
 // the stock ones) have the soname and the exports the closed libdsi_netctrl.so and libqcrilDataModule.so
 // need, and the daemon crates (qmi, netcfg, datacore, datad and datad-rt with the binary datad) have the same
 // three lint properties. This file has the init rc, which the binary installs through required:
-// (the pattern of the IMS daemon). The device pulls all of it in only with DIAMANEOS_DATAD=true
-// (datad-board.mk and datad-product.mk).
+// (the pattern of the IMS daemon). The device pulls all of it in with datad-board.mk and
+// datad-product.mk.
 //
 // Soong builds device Rust with -C panic=abort (build/soong/rust/config/global.go), so a panic in libnicm
 // or libnicm_dsi ends qcrilNrd. The crates linked into it forbid unwrap, expect, panic, indexing and
@@ -20,10 +20,10 @@
 // platform build too. clippy-driver finds clippy.toml through CARGO_MANIFEST_DIR, which Soong sets only
 // with cargo_env_compat. android/README.md says how to prove the wall in a platform build.
 
-// The modules are off unless the device sets DIAMANEOS_DATAD=true (datad-soong.mk sets the Soong
-// config). Soong writes the install rule of every module that exists, and libnicm and libnicm_dsi
-// install to the paths of the stock files, so the modules of a build with the stock data stack must
-// not exist. Every Rust module of the crates takes this default.
+// The modules are off unless the Soong config is set, which only the device board file does through
+// datad-soong.mk. Soong writes the install rule of every module that exists, so they must not exist
+// for another target in the tree, such as the generic one the image tools build. Every Rust module of
+// the crates takes this default.
 soong_config_module_type {
     name: "diamaneos_datad_rust_defaults",
     module_type: "rust_defaults",

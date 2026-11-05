@@ -1,16 +1,14 @@
 # Android integration
 
-The Soong modules, the device wiring and the policy of the open data stack. Everything is behind one build switch
-of the device, `DIAMANEOS_DATAD`, which the FP6 requires.
+The Soong modules, the device wiring and the policy of the open data stack. The FP6 includes the board and product files.
 
 - `Android.bp` has the init rc module and the Soong default that switches the Rust modules off. The modules are next to
   their crates (`crates/*/Android.bp`). They take `diamaneos_datad_defaults`, which is `enabled: false` unless the Soong
-  config `diamaneos_datad.datad_enabled` is set (`datad-soong.mk`). Soong writes an install rule for every module that exists
-  and `libnicm` and `libnicm_dsi` install to the paths of the stock files, so with the stock vendor tree the two would meet
-  in Kati ("overriding commands for target").
-- `datad-board.mk`: included by the device `BoardConfig.mk` only with the switch on. Policy directory, the m4 define
-  `datad_enabled` (the device `qrtr.te` names `diamaneos_datad` under `ifdef`), the vendor UID file and the Soong config.
-- `datad-product.mk`: included by the device `telephony.mk` only with the switch on. It stops the build when a closed peer
+  config `diamaneos_datad.datad_enabled` is set (`datad-soong.mk`), which only the device board file does. Soong writes an install
+  rule for every module that exists, so they must not exist for another target in the tree.
+- `datad-board.mk`: included by the device `BoardConfig.mk`. Policy directory, the vendor UID file and the Soong config. The
+  device `qrtr.te` names `diamaneos_datad` and `diamaneos_wlantunnel`.
+- `datad-product.mk`: included by the device `telephony.mk`. It stops the build when a closed peer
   is not the pinned file (`datad-pins.mk`), or when the vendor tree still has a stock nicm file, and adds the packages.
   `test-datad-product.sh` runs it on made-up trees.
 - `datad-pins.mk`: SHA-256 of `libdsi_netctrl.so`, `libqdi.so` and `libqcrilDataModule.so` of the stock release the layouts
@@ -26,8 +24,7 @@ of the device, `DIAMANEOS_DATAD`, which the FP6 requires.
   ours, the daemon does what its code does) must be allowed by the compiled policy while a shell connecting is not. The
   recovery policy takes the vendor policy as well, so `m sepolicy.recovery` builds with it.
 - `wlantunneld.rc`: init service of the Wi-Fi tunnel daemon, with its own user and no supplementary group, and its tmpfs
-  directory `/dev/wlantunnel`. `sepolicy/vendor/wlantunnel.te` is its domain, written the same way as `datad.te`, and the
-  device `qrtr.te` names `diamaneos_wlantunnel` under the same `ifdef` as `diamaneos_datad`.
+  directory `/dev/wlantunnel`. `sepolicy/vendor/wlantunnel.te` is its domain, written the same way as `datad.te`.
 - `config.fs`: the vendor UIDs, 2998 for the data daemon and 2989 for the Wi-Fi tunnel daemon. 2995 is `AID_VENDOR_POWERSTATS`. The value must be in the OEM range (2900 to 2999),
   not shared with another section of any `config.fs` of the product, and outside the stock range 2901 to 2917.
 - `vendor-selection.md`: the stock files that leave the vendor image, and how the project tools take them out.
@@ -37,7 +34,7 @@ Rust modules: `libdataos_wire`, `libdataos_nicm_compat` and `libdataos_nicm_abi`
 `libdataos_datacore`, `libdataos_datad`, `libdataos_datad_rt` and the binary `datad` run in the daemon, and
 `libdataos_wlan_tunnel` and the binary `wlantunneld` in the Wi-Fi tunnel daemon. Every module has
 `clippy_lints: "android"`, `lints: "vendor"` and `cargo_env_compat: true`, and tests in `crates/nicm-compat/tests/no_panic.rs`
-fail if one is missing, if the Soong dependencies differ from the Cargo ones, or if a module lacks the switch default. The
+fail if one is missing, if the Soong dependencies differ from the Cargo ones, or if a module lacks the default. The
 Rust code treats the Android target as Linux (`target_os = "android"` in the cfg lists).
 
 Two things the first build on the builder showed. The five crates of `qcrilNrd` list `clippy.toml` among their `srcs` and

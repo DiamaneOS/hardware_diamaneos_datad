@@ -1,15 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The DiamaneOS Project
 #
-# Inherited from the device telephony.mk only when DIAMANEOS_DATAD is true (after datad-board.mk
-# was included). Two checks first, so a product that would ship the wrong data stack does not
-# build, then the packages.
+# Inherited from the device telephony.mk, after the board file included datad-board.mk. Two checks
+# first, so a product that would ship the wrong data stack does not build, then the packages.
 #
 # 1. The closed peers are the ones the layouts were read from (datad-pins.mk).
 # 2. The vendor tree has none of the stock nicm files. Soong installs the shared libraries a module
 #    links, so a tree that still renders libnicm.so and libnicm_dsi.so would install the stock pair
-#    next to ours at the same path. The tree is made for this switch by the project tools,
-#    diamaneos build vendor --datad.
+#    next to ours at the same path. The project tools make the tree without them, with
+#    diamaneos build vendor.
 DATAD_PINS_MK ?= hardware/diamaneos/datad/android/datad-pins.mk
 include $(DATAD_PINS_MK)
 
@@ -37,7 +36,7 @@ DATAD_STOCK_NICM := \
     vendor/lib64/librmnetctl.so \
     vendor/lib64/libshsc.so
 ifneq ($(wildcard $(addprefix $(DATAD_VENDOR_FILES)/,$(DATAD_STOCK_NICM))),)
-$(error datad: the vendor tree still has stock nicm files: $(wildcard $(addprefix $(DATAD_VENDOR_FILES)/,$(DATAD_STOCK_NICM))). Make it with diamaneos build vendor --datad)
+$(error datad: the vendor tree still has stock nicm files: $(wildcard $(addprefix $(DATAD_VENDOR_FILES)/,$(DATAD_STOCK_NICM))). Make it with diamaneos build vendor)
 endif
 
 # The daemon, the Wi-Fi tunnel daemon, the two libraries that take the place of libnicm.so and libnicm_dsi.so,
