@@ -1,8 +1,7 @@
 # Android integration
 
 The Soong modules, the device wiring and the policy of the open data stack. Everything is behind one build switch
-of the device, `DIAMANEOS_DATAD`. A build without it is the stock data stack: the Soong modules do not
-exist, the policy is not added and the product does not change.
+of the device, `DIAMANEOS_DATAD`, which the FP6 requires.
 
 - `Android.bp` has the init rc module and the Soong default that switches the Rust modules off. The modules are next to
   their crates (`crates/*/Android.bp`). They take `diamaneos_datad_defaults`, which is `enabled: false` unless the Soong

@@ -86,9 +86,8 @@ A crash found there gets a test in the crate it was found in, so `cargo test` ke
 
 ## Selecting it in a device build
 
-Everything is behind one build switch of the device, `DIAMANEOS_DATAD`. Without it the build is
-the stock data stack: the Soong modules do not exist, the policy is not added and the product does not change.
-With it on, the device build sets the Soong config that enables the modules, adds the policy directory and the
+Everything is behind one build switch of the device, `DIAMANEOS_DATAD`, which is true by default and must stay
+true on the FP6, as its policy has no stock nicmd. The device build sets the Soong config that enables the modules, adds the policy directory and the
 vendor UID, installs `datad` with its init rc, and replaces `libnicm.so` and `libnicm_dsi.so` at the stock paths.
 The product makefile stops the build when one of the closed peers the layouts were read from (`libdsi_netctrl.so`,
 `libqdi.so`, `libqcrilDataModule.so`) is not the pinned file, or when the vendor tree still has a stock nicm file.
